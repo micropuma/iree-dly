@@ -1,0 +1,7 @@
+cmake -G Ninja -B ../iree-build/ -S . \
+    -DCMAKE_CXX_FLAGS="-Wno-error=dangling-pointer" \
+    -DIREE_TARGET_BACKEND_DEFAULTS=OFF \
+    -DIREE_TARGET_BACKEND_LLVM_CPU=ON \
+    -DIREE_HAL_DRIVER_DEFAULTS=OFF \
+    -DIREE_HAL_DRIVER_LOCAL_SYNC=ON \
+    -DIREE_HAL_DRIVER_LOCAL_TASK=ON

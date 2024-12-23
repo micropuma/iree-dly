@@ -1,0 +1,263 @@
+// Copyright 2020 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef IREE_COMPILER_CODEGEN_UTILS_UTILS_H_
+#define IREE_COMPILER_CODEGEN_UTILS_UTILS_H_
+
+#include "iree/compiler/Dialect/Flow/IR/FlowOps.h"
+#include "iree/compiler/Dialect/HAL/IR/HALOps.h"
+#include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOps.h"
+#include "llvm/TargetParser/Triple.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Linalg/Utils/Utils.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h"
+#include "mlir/Dialect/Vector/IR/ScalableValueBoundsConstraintSet.h"
+#include "mlir/Dialect/Vector/Transforms/VectorTransforms.h"
+#include "mlir/IR/Dominance.h"
+#include "mlir/IR/OpDefinition.h"
+#include "mlir/IR/PatternMatch.h"
+#include "mlir/Interfaces/FunctionInterfaces.h"
+
+namespace mlir::iree_compiler {
+
+static constexpr unsigned kNumMaxParallelDims = 3;
+
+//===----------------------------------------------------------------------===//
+// Utility functions to get entry points
+//===----------------------------------------------------------------------===//
+
+/// Returns true if the given `func` is a kernel dispatch entry point.
+bool isEntryPoint(mlir::FunctionOpInterface func);
+
+/// Returns the entry point op for the `funcOp`. Returns `nullptr` on failure.
+std::optional<IREE::HAL::ExecutableExportOp>
+getEntryPoint(mlir::FunctionOpInterface funcOp);
+
+/// Returns the StringAttr with the name `stringAttr` in the `targetAttr`, if
+/// found.
+std::optional<StringAttr>
+getConfigStringAttr(IREE::HAL::ExecutableTargetAttr targetAttr,
+                    StringRef stringAttr);
+
+/// Returns the IntegerAttr with the name `integerAttr` in the `targetAttr`, if
+/// found.
+std::optional<IntegerAttr>
+getConfigIntegerAttr(IREE::HAL::ExecutableTargetAttr targetAttr,
+                     StringRef integerAttr);
+
+/// Returns the BoolAttr with the name `integerAttr` in the `targetAttr`, if
+/// found.
+std::optional<BoolAttr>
+getConfigBoolAttr(IREE::HAL::ExecutableTargetAttr targetAttr,
+                  StringRef integerAttr);
+
+/// Returns the LLVM Target triple associated with the `targetAttr`, if set.
+std::optional<llvm::Triple>
+getTargetTriple(IREE::HAL::ExecutableTargetAttr targetAttr);
+
+/// Returns the target architecture name, in IREE_ARCH convention, from the
+/// given target triple.
+const char *getIreeArchNameForTargetTriple(llvm::Triple triple);
+
+/// Methods to get target information.
+bool isVMVXBackend(IREE::HAL::ExecutableTargetAttr targetAttr);
+
+/// Methods to get target information.
+bool isROCMBackend(IREE::HAL::ExecutableTargetAttr targetAttr);
+
+// Returns true if the ukernel with given `ukernelName` is enabled.
+// If `ukernelName` is empty (the default), returns true if any ukernel
+// is enabled at all.
+bool hasUkernel(IREE::HAL::ExecutableTargetAttr targetAttr,
+                StringRef ukernelName = "");
+
+/// Returns the CPU target features associated with the `targetAttr`, if set.
+std::optional<StringRef>
+getCpuFeatures(IREE::HAL::ExecutableTargetAttr targetAttr);
+
+/// Returns true if `targetAttr` has `feature` in its CPU features.
+bool hasFeature(IREE::HAL::ExecutableTargetAttr targetAttr, StringRef feature);
+
+// Architecture identification.
+bool isX86(IREE::HAL::ExecutableTargetAttr targetAttr);
+bool isX86_64(IREE::HAL::ExecutableTargetAttr targetAttr);
+bool isAArch64(IREE::HAL::ExecutableTargetAttr targetAttr);
+bool isRISCV(IREE::HAL::ExecutableTargetAttr targetAttr);
+bool isRISCV32(IREE::HAL::ExecutableTargetAttr targetAttr);
+
+/// Checks if a tensor value is generated from a read-only object, like
+/// and interface binding with read-only attribute or from an `arith.constant`
+/// operation.
+bool isReadOnly(Value v);
+
+/// Multiple uses of `tensor.empty()` results in a copy since upstream
+/// treats `tensor.empty()` as an allocation and sees uses as a data-hazard
+/// creating copies/allocations. Since the `empty` op is a proxy for
+/// undef, these could just be duplicated to have a single use. This removes
+/// unnecessary data-hazards.
+LogicalResult duplicateTensorEmptyOps(OpBuilder &b, tensor::EmptyOp emptyOp);
+
+/// Return the static number of workgroup dispatched if it is known and
+/// constant. If it is not known, it will return ShapedType::kDynamic.
+SmallVector<int64_t> getStaticNumWorkgroups(mlir::FunctionOpInterface funcOp);
+
+//===----------------------------------------------------------------------===//
+// Utility functions to set configurations
+//===----------------------------------------------------------------------===//
+
+LogicalResult setDefaultCustomOpLoweringConfig(
+    mlir::FunctionOpInterface FunctionOpInterface,
+    IREE::LinalgExt::CustomOp customOp,
+    std::function<LogicalResult(mlir::FunctionOpInterface)> configFn);
+
+/// Information about a tiled and distributed loop.
+///
+/// Right now distribution is happening as the same time when we tile the linalg
+/// op. 0) Given an original loop:
+///
+/// ```
+/// scf.for %iv = %init_lb to %init_ub step %init_step { ... }
+/// ```
+//
+/// 1) After tiling with tile size `%tile_size`, we have:
+//
+/// ```
+/// %tiled_step = %init_step * %tile_size
+/// scf.for %iv = %init_lb to %init_ub step %tiled_step { ... }
+/// ```
+///
+/// 2) After distribution with processor `%id` and `%count`, we have:
+//
+/// ```
+/// %dist_lb = %init_lb + %id * %tiled_step
+/// %dist_step = %init_step * %tile_size * %count
+/// scf.for %iv = %dist_lb to %init_ub step %dist_step { ... }
+/// ```
+///
+/// Given a loop already after 2), this struct contains recovered information
+/// about 0) and 1).
+struct LoopTilingAndDistributionInfo {
+  // The tiled and distributed loop.
+  Operation *loop;
+  // The lower bound for the original untiled loop.
+  OpFoldResult untiledLowerBound;
+  // The upper bound for the original untiled loop.
+  OpFoldResult untiledUpperBound;
+  // The step for the original untiled loop.
+  OpFoldResult untiledStep;
+  // The tile size used to tile (and not distribute) the original untiled loop.
+  std::optional<int64_t> tileSize;
+  // The processor dimension this loop is distributed to.
+  unsigned processorDistributionDim;
+};
+
+/// Returns the list of TilingInterface ops in the operation obtained by a
+/// post order walk of the operation. This implies that in case of
+/// nested compute ops, the outermost compute ops are towards the end of the
+/// list.
+SmallVector<Operation *> getComputeOps(Operation *containingOp);
+
+/// If the given `forOp` is a tiled and distributed loop, returns its tiling and
+/// distribution information.
+std::optional<LoopTilingAndDistributionInfo>
+isTiledAndDistributedLoop(scf::ForOp forOp);
+
+/// Collects information about loops matching tiled+distribute pattern.
+SmallVector<LoopTilingAndDistributionInfo>
+getTiledAndDistributedLoopInfo(mlir::FunctionOpInterface funcOp);
+
+/// Sets the tile sizes of the SCFTilingOptions. If `tileScalableFlags` are
+/// provided the corresponding tile size will be multiplied by a vector.vscale
+/// op.
+void setSCFTileSizes(scf::SCFTilingOptions &options, TilingInterface op,
+                     ArrayRef<int64_t> tileSizes,
+                     ArrayRef<bool> tileScalableFlags);
+
+Operation *createLinalgCopyOp(OpBuilder &b, Location loc, Value from, Value to,
+                              ArrayRef<NamedAttribute> attributes = {});
+
+/// Returns the option that distributes the ops using the flow workgroup
+/// ID/Count operations.
+linalg::LinalgLoopDistributionOptions getIREELinalgLoopDistributionOptions(
+    linalg::DistributionMethod distributionMethod,
+    int32_t maxWorkgroupParallelDims = kNumMaxParallelDims);
+
+// Helper to construct the strategy attribute dictionary for a pipeline that
+// does software pipelining.
+DictionaryAttr
+getSoftwarePipeliningAttrDict(MLIRContext *context,
+                              unsigned softwarePipelineDepth = 0,
+                              unsigned softwarePipelineStoreStage = 1);
+
+// Helpers to extract the pipelining configuration from the config dictionary.
+FailureOr<int64_t> getSoftwarePipelineDepth(DictionaryAttr);
+FailureOr<int64_t> getSoftwarePipelineStoreStage(DictionaryAttr);
+
+// Returns a small tiling factor for the given reduction `dimSize`.
+// Returns 0 to avoid tiling.
+int getReductionTilingFactor(int64_t dimSize);
+
+// Returns the minimal element bitwidth used in the operands and results of the
+// given Linalg op.
+int64_t getMinElementBitwidth(linalg::LinalgOp linalgOp);
+
+//===---------------------------------------------------------------------===//
+// Misc. utility functions.
+//===---------------------------------------------------------------------===//
+
+/// Convert byte offset into offsets in terms of number of elements based
+/// on `elementType`
+OpFoldResult convertByteOffsetToElementOffset(RewriterBase &rewriter,
+                                              Location loc,
+                                              OpFoldResult byteOffset,
+                                              Type elementType);
+
+/// Check if a linalg.generic is representing an argmax operation.
+LogicalResult isArgmaxOp(linalg::GenericOp genericOp);
+
+/// Replace the uses of memref value `origValue` with the given
+/// `replacementValue`. Some uses of the memref value might require changes to
+/// the operation itself. Create new operations which can carry the change, and
+/// transitively replace their uses.
+void replaceMemrefUsesAndPropagateType(RewriterBase &rewriter, Location loc,
+                                       Value origValue, Value replacementValue);
+
+/// Sink given operations as close as possible to their uses.
+void sinkOpsInCFG(const SmallVector<Operation *> &allocs,
+                  DominanceInfo &dominators);
+
+// Check if there is a fused linalg op present in the backward slice of any of
+// the inputs.
+bool hasFusedLeadingOp(linalg::LinalgOp rootOp);
+
+std::optional<vector::VscaleRange>
+getDefaultVscaleRange(IREE::HAL::ExecutableTargetAttr targetAttr);
+
+using DimBound = vector::ConstantOrScalableBound;
+using DimBoundSize = DimBound::BoundSize;
+
+/// Should the scalable upper bound be rounded up to the nearest multiple of
+/// vscale?
+enum class RoundUpVscaleMultiple { No, Yes };
+
+/// Computes the upper bound of `dimNum` dim of the ShapedType value
+/// `shapedValue`. If the optional `vscaleRange` is provided then the computed
+/// bound can be a scalable quantity.
+FailureOr<DimBoundSize>
+computeDimUpperBound(Value shapedValue, unsigned dimNum,
+                     std::optional<vector::VscaleRange> vscaleRange,
+                     RoundUpVscaleMultiple = RoundUpVscaleMultiple::No);
+
+// Utility to make sure we are storing the full incoming subspan. Otherwise we
+// cannot simply adjust the subspan's resultant type later.
+bool isFullSlice(OffsetSizeAndStrideOpInterface sliceLoadStoreOp,
+                 IREE::Flow::DispatchTensorType tensorType,
+                 ValueRange dynamicDims);
+
+} // namespace mlir::iree_compiler
+
+#endif // IREE_COMPILER_CODEGEN_UTILS_UTILS_H_
