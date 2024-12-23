@@ -23,6 +23,7 @@ namespace {
 // CommonInputConversionPassPipeline是inputdialect的函数入口。
 void buildCommonInputConversionPassPipeline(
     OpPassManager &passManager, const TransformOptions &transformOptions) {
+  // 下述三个pass各自有.cpp来完成定义
   passManager.addPass(createIREEImportPublicPass());
   passManager.addPass(createImportMLProgramPass());
   passManager.addPass(createSanitizeModuleNamesPass());

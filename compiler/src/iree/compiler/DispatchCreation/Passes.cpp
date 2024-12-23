@@ -261,7 +261,9 @@ static void addDispatchRegionCreationPasses(OpPassManager &passManager) {
       .addPass(DispatchCreation::createCollapseDimensionsPass);
 }
 
+// todo：需要继续分析
 // Apply preprocessing and form dispatch regions
+// 生成dispatch regions，方便后续的Flow（workload和dispatch分离） transformation。
 void buildDispatchCreationPassPipeline(
     OpPassManager &passManager, const TransformOptions &transformOptions) {
 

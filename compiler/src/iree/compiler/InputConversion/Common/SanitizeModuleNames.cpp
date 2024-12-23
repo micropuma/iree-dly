@@ -17,6 +17,21 @@ namespace mlir::iree_compiler::InputConversion {
 
 namespace {
 
+// 这个pass做的工作相当简单：
+// 将变量名字对于IREE的规则做适配。
+// std::string sanitizeSymbolName(StringRef name) {
+//   std::string result;
+//   result.reserve(name.size());
+//   for (size_t i = 0; i < name.size(); ++i) {
+//     char c = name[i];
+//     if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+//           (c >= '0' && c <= '9') || c == '_')) {
+//       c = '_';
+//     }
+//     result.push_back(c);
+//   }
+//   return result;
+// }
 class SanitizeModuleNamesPass final
     : public impl::SanitizeModuleNamesPassBase<SanitizeModuleNamesPass> {
 public:

@@ -152,6 +152,7 @@ convertExecutableObjects(IREE::Input::ExecutableObjectsAttr src) {
 //===----------------------------------------------------------------------===//
 // Generic 1:1 conversion pattern which effectively just renames an op.
 // It does not support regions or ops with successors.
+// 注释写的很明确了：直接
 //===----------------------------------------------------------------------===//
 
 class OneToOneConverionPattern : public ConversionPattern {
@@ -171,6 +172,7 @@ public:
              << "could not convert result types to IREE internal types";
     }
 
+    // 重点是替换掉name为targetName。
     OperationState state(srcOp->getLoc(), targetName, operands, resultTypes,
                          srcOp->getAttrs());
     Operation *targetOp = rewriter.create(state);
@@ -444,6 +446,7 @@ class GlobalOpPattern : public OpConversionPattern<IREE::Input::GlobalOp> {
   }
 };
 
+// 此pattern转换规则，只有在实在没有转换可能性后，才转换。
 // Matches any op and generically converts types. Matches with benefit 0.
 class GenericTypeConvert : public ConversionPattern {
 public:
@@ -475,8 +478,11 @@ public:
 
 } // namespace
 
+/// 这段代码是关键，定义了可能的conversion类型。
 IREETypeConverter::IREETypeConverter() {
   addConversion([](Type t) { return t; });
+
+  // 捕获列表，捕获外部的所有变量，且是值。
   addConversion([=](IREE::Input::BufferType t) {
     return IREE::HAL::BufferType::get(t.getContext());
   });
@@ -536,6 +542,7 @@ void IREEImportPublicPass::runOnOperation() {
   // 注册转换的pattern机制，注意提供的benefit值。
   IREETypeConverter typeConverter;
   PatternBenefit specific_benefit = 100;
+  // 在这里给typeConverter注册可行的TypeConvert：GenericTypeConvert
   patterns.insert<GenericTypeConvert>(typeConverter, &getContext(), 0);
   patterns.insert<GlobalOpPattern>(typeConverter, &getContext(), 0);
   patterns.insert<TensorExportPattern, TensorImportPattern>(
@@ -543,6 +550,8 @@ void IREEImportPublicPass::runOnOperation() {
   patterns.insert<ExecutableSourcePattern, ExecutableExportPattern>(
       typeConverter, &getContext(), specific_benefit);
 
+  // 区别于addLegalDialect，这个addDynamicallyLegalDialect表示
+  // func::FuncDialect是部分合法的。
   target.addDynamicallyLegalDialect<func::FuncDialect>(
       [&](Operation *op) -> std::optional<bool> {
         // Allow the func dialect within nested modules but not in the top-level
@@ -561,6 +570,8 @@ void IREEImportPublicPass::runOnOperation() {
       typeConverter, SrcOpTy::getOperationName(),                              \
       TargetOpTy::getOperationName(), &getContext(), specific_benefit)
 
+  // 接下来是iree的直接映射，这一块逻辑比较简单，
+  // 使用iree的ONE_TO_ONE即可。
   ONE_TO_ONE(IREE::Input::BufferSubspanOp, IREE::HAL::BufferSubspanOp);
   ONE_TO_ONE(IREE::Input::BufferViewCreateOp, IREE::HAL::BufferViewCreateOp);
   ONE_TO_ONE(IREE::Input::BufferViewRankOp, IREE::HAL::BufferViewRankOp);

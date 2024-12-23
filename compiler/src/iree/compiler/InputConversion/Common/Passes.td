@@ -10,6 +10,8 @@
 include "mlir/Pass/PassBase.td"
 
 // some passes run on input dialect.
+// 这个pass是iree整个流程的第一个入口，即将stableHLO等dialect转换成
+// InputDialect后的处理pass。
 
 def IREEImportPublicPass :
     Pass<"iree-import-public", "ModuleOp"> {

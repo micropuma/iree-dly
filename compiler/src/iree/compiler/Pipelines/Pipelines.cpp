@@ -23,6 +23,8 @@
 
 namespace mlir::iree_compiler {
 
+/// 这个的作用是定义HOOK相关的helper function
+/// 可以辅助debug 调试。
 static IREE::HAL::PipelinePhase
 getHALPipelinePhase(IREEVMPipelinePhase phase,
                     IREE::HAL::PipelinePhase defaultPhase) {
@@ -128,6 +130,8 @@ void buildIREEPrecompileTransformPassPipeline(
     InputConversion::TransformOptions inputTransformOptions;
     inputTransformOptions.options = inputOptions;
 
+    // 在/InputConversion/Common/Passes.cpp中，
+    // 包含将input dialect变成HAL，standard dialect的过程。
     InputConversion::buildCommonInputConversionPassPipeline(
         passManager, inputTransformOptions);
     if (hooks.afterPhase)
@@ -137,6 +141,8 @@ void buildIREEPrecompileTransformPassPipeline(
   if (compileTo == IREEVMPipelinePhase::Input)
     return; // early-exit
 
+  // 这个pass是处理外部导入模块和调用的ABI兼容性问题的。
+  // todo：对于ABI以及外部模块了解不够。
   // Now that inputs are legalized, generate wrapper for entry functions.
   if (compileFrom < IREEVMPipelinePhase::ABI) { // late-entry
     IREE_TRACE_ADD_BEGIN_FRAME_PASS(passManager, "ABI");
@@ -242,6 +248,9 @@ void buildIREEPrecompileTransformPassPipeline(
   }
 }
 
+// todo：基于这个pass pipeline，我们可以有十分清晰的progressive lowering的流程
+// 需要逐一解析流程。
+// 这个pass pipeline包含的是standard的HLO -> Input -> Flow -> Stream -> HAL -> VM
 void buildIREEVMTransformPassPipeline(
     const IREE::HAL::TargetRegistry &targetRegistry,
     BindingOptions bindingOptions, InputDialectOptions inputOptions,
@@ -272,6 +281,7 @@ void buildIREEVMTransformPassPipeline(
     // No flow/stream processing (implies no tensors).
     break;
   default:
+    // 我们先解读default选项，即理解DispatchCreate这个pass的作用。
     DispatchCreation::TransformOptions dispatchCreationOptions;
     if (compileFrom < IREEVMPipelinePhase::DispatchCreation) { // late-entry
       IREE_TRACE_ADD_BEGIN_FRAME_PASS(passManager, "DispatchCreation");
@@ -379,6 +389,7 @@ void buildDefaultIREEVMTransformPassPipeline(OpPassManager &passManager) {
   auto highLevelOptimizations = GlobalOptimizationOptions::FromFlags::get();
   highLevelOptimizations.constEval = false;
 
+  // 这是我们最关心的IREE这个pass pipeline的流程。
   buildIREEVMTransformPassPipeline(
       IREE::HAL::TargetRegistry::getGlobal(), BindingOptions::FromFlags::get(),
       InputDialectOptions::FromFlags::get(),

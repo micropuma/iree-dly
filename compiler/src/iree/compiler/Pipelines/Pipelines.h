@@ -22,13 +22,14 @@ namespace IREE::HAL {
 struct PipelineHooks;
 } // namespace IREE::HAL
 
+// 可以从中解读出这个IREE pipeline的抽象层级执行顺序。
 enum class IREEVMPipelinePhase {
   Start,
   Input,
   ABI,
   Preprocessing,
   GlobalOptimization,
-  DispatchCreation,
+  DispatchCreation,       // 重点关注iree如何做计算调度的dispatch
   Flow,
   Stream,
   ExecutableSources,
