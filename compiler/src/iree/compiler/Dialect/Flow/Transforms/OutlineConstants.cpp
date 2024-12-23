@@ -26,12 +26,14 @@ namespace mlir::iree_compiler::IREE::Flow {
 
 namespace {
 
+// 关键核心函数，用来判断value是否值得outline
 // Returns true if |value| is worth outlining (large, etc).
 static bool isOutlinableValue(Attribute value) {
   if (auto elementsAttr = llvm::dyn_cast<ElementsAttr>(value)) {
     // Don't outline splats - we want those fused.
     return !elementsAttr.isSplat();
   } else if (isa<IREE::Flow::NamedParameterAttr>(value)) {
+    // 在outline中，总是会选择outline 参数中的常量。
     // Always outline parameter constants.
     return true;
   }
@@ -44,14 +46,19 @@ struct ConstantDef {
   TypedAttr value;
 };
 
+// 构建constant op的候选集
 // Returns a list of all constant-like shaped data ops in the module.
 static SmallVector<ConstantDef> findConstantsInModule(mlir::ModuleOp moduleOp) {
   SmallVector<ConstantDef> results;
+  // 遍历module op中所有实现被调用interface的operation
   for (auto callableOp : moduleOp.getOps<CallableOpInterface>()) {
     auto *region = callableOp.getCallableRegion();
     if (!region)
       continue;
     region->walk([&](Operation *op) {
+      // 可以将两种constant 放入worklist中：
+      // 一种是arith::ConstantOp
+      // 另一种是Flow::TensorConstantop
       if (auto constantOp = dyn_cast<arith::ConstantOp>(op)) {
         if (isOutlinableValue(constantOp.getValue())) {
           results.push_back(ConstantDef{
@@ -77,6 +84,7 @@ static SmallVector<ConstantDef> findConstantsInModule(mlir::ModuleOp moduleOp) {
 // Returns the operation containing |childOp| that is a direct child of
 // |ancestorOp|. May return |childOp|.
 static Operation *getParentInOp(Operation *childOp, Operation *ancestorOp) {
+  // 非常自然的实现方法
   assert(childOp != ancestorOp && "child can't be its own ancestor");
   do {
     auto *parentOp = childOp->getParentOp();
@@ -111,6 +119,7 @@ static std::string getConstantName(ConstantDef &def) {
 // --iree-flow-outline-constants
 //===----------------------------------------------------------------------===//
 
+// 这个pass的核心部分。
 struct OutlineConstantsPass
     : public IREE::Flow::impl::OutlineConstantsPassBase<OutlineConstantsPass> {
   void runOnOperation() override {
@@ -125,6 +134,7 @@ struct OutlineConstantsPass
     for (auto &def : findConstantsInModule(moduleOp)) {
       // Position the global immediately preceding the top-level op that
       // contains the constant.
+      // 在moduleOp的child，同时是def.op的ancestor处，做global constant outline。
       OpBuilder moduleBuilder(&moduleOp.getBody()->front());
       auto parentFuncOp = getParentInOp(def.op, moduleOp);
       if (parentFuncOp)
@@ -136,6 +146,8 @@ struct OutlineConstantsPass
           def.op->getLoc(), getConstantName(def), /*isMutable=*/false, def.type,
           def.value);
       globalOp.setPrivate();
+
+      // todo：搞清楚这行代码的作用。
       IREE::Util::HoistableAttrInterface::gatherHoistableAttrs(def.op,
                                                                globalOp);
       moduleSymbols.insert(globalOp); // uniques name
@@ -157,6 +169,7 @@ struct OutlineConstantsPass
       builder.setInsertionPoint(originalOp);
       auto loadOp = globalOp.createLoadOp(originalOp->getLoc(), builder);
       loadOp.setGlobalImmutable(true);
+      // 将originalOp处全部替换成load op。
       originalOp->getResult(0).replaceAllUsesWith(
           loadOp.getLoadedGlobalValue());
       originalOp->erase();

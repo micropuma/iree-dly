@@ -29,6 +29,7 @@ namespace mlir::iree_compiler::DispatchCreation {
 #define GEN_PASS_DEF_TENSORPADTOTENSORINSERTSLICEPASS
 #include "iree/compiler/DispatchCreation/Passes.h.inc"
 
+// 这个pass专门用来优化pad 到 fill + tensor.insert_slice的。
 namespace {
 /// Pattern to convert a tensor.tensor operation into a fill +
 /// tensor.insert_slice. This is needed till tensor.pad op can be fused with its
@@ -57,6 +58,7 @@ struct TensorPadOpConversion : public OpRewritePattern<tensor::PadOp> {
     if (padTensorOp->hasOneUse()) {
       Operation *use = padTensorOp->use_begin()->getOwner();
       if (skipSingleLinalgOpUses) {
+        // 单一使用场景且是量化操作，则跳过转换步骤。
         // TODO(#10312): Relax the condition to not check quantized ops. They
         // are going to be deprecated. We don't expect them being IREE's input.
         if (isa<linalg::LinalgOp>(use) &&

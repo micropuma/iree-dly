@@ -108,6 +108,7 @@ static void addCleanupPatterns(OpPassManager &passManager) {
 // Pipelines
 //===----------------------------------------------------------------------===//
 
+// 学习Flow dialect的核心pipeline
 void buildFlowTransformPassPipeline(OpPassManager &passManager,
                                     const TransformOptions &transformOptions) {
   // Start of Flow pipeline, verify input legality.
@@ -206,6 +207,9 @@ void buildFlowTransformPassPipeline(OpPassManager &passManager,
     // effectively.
     OpPassManager ipoPipeline(mlir::ModuleOp::getOperationName());
 
+    // 归根结底，IPO pipeline就是做了如下两件事：
+    // 1. 做inline pass。
+    // 2. 利用不动点算法，做clean up优化。
     // Turn all constant ops into global variables and fix up the IR.
     // As many locations change and constants are deduplicated we'll end up with
     // a lot of extraneous IR (mostly global loads) and clean those up here.

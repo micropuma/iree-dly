@@ -204,6 +204,7 @@ void addDispatchRegionCreationPreprocessingPasses(OpPassManager &passManager) {
 
 // Pipeline to first create `flow.dispatch.region` ops and then lower to
 // `flow.dispatch.workgroup` ops.
+// Dispatch的核心代码段
 static void addDispatchRegionCreationPasses(OpPassManager &passManager) {
   FunctionLikeNest(passManager)
       // Only want use the transform dialect for some dispatch regions and let
@@ -274,6 +275,7 @@ void buildDispatchCreationPassPipeline(
 
   // Transform pad operations into linalg.fill + tensor.insert_slice.
   // This is a WAR for not having native pad handling.
+  // 将pad操作变成熟悉的linalg.fill和tensor.insert_slice操作。
   if (!clEnablePadHandling && !clEnableFusePaddingIntoLinalgProducerOps) {
     passManager.addPass(
         DispatchCreation::createTensorPadToTensorInsertSlicePass(
@@ -288,6 +290,7 @@ void buildDispatchCreationPassPipeline(
     // verifiable/reusable passes. IPO will fold duplicate arguments/results
     // and inline constants to allow the local optimizations to work more
     // effectively.
+    // 这是过程间的pass调用。
     OpPassManager ipoPipeline(mlir::ModuleOp::getOperationName());
 
     // IPO and other cleanups.

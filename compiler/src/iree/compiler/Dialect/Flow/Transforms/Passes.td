@@ -217,6 +217,7 @@ def InsertDebugTargetAtOrdinalPass :
   ];
 }
 
+// 这个pass将local的tensor constant全部变成util.globals。
 def OutlineConstantsPass :
     Pass<"iree-flow-outline-constants", "mlir::ModuleOp"> {
   let summary = "Outlines tensor constants into util.globals at the module level.";
