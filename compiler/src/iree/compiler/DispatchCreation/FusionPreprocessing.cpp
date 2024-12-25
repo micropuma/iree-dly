@@ -43,24 +43,34 @@ namespace {
 //===----------------------------------------------------------------------===//
 
 // If possible, interchange indexing maps to make input maps all identity.
+// 这个pattern的作用是使得input maps的所有索引映射为恒等
 struct ElementwiseOpInterchangePattern final
     : public OpRewritePattern<linalg::GenericOp> {
   using OpRewritePattern::OpRewritePattern;
   LogicalResult matchAndRewrite(linalg::GenericOp genericOp,
                                 PatternRewriter &rewriter) const override {
+    // 只有elementwise的操作做这个预处理才有价值。
     if (!linalg::isElementwise(genericOp) || genericOp.getNumResults() != 1 ||
         genericOp.getNumDpsInputs() == 0)
       return failure();
 
+    // 重点关注适配场景的限制：
+    // 1. All input maps must be equalt and non-dientity.
     // All input maps must be equal and non-identity. All maps, including
     // output, must be be permutations. Permutation maps are checked by
     // isElementwise but may be removed.
     AffineMap inputMap = genericOp.getIndexingMapsArray().front();
     auto *initOperand = genericOp.getDpsInitOperand(0);
+    // inputmap如果已经是identity，则不用做此变化。
+    // inputmap如果不是全排列（linalg dialect放松了条件），则此pass不适用
+    // 如果输出的output tensor不是全排列，也不能用此pass
+    // 输出张量只有一个，所以只用检查一个dps
     if (inputMap.isIdentity() || !inputMap.isPermutation() ||
         !genericOp.getMatchingIndexingMap(initOperand).isPermutation()) {
       return failure();
     }
+
+    // 判断所有的input map是一样的
     for (auto *operand : genericOp.getDpsInputOperands()) {
       if (genericOp.getMatchingIndexingMap(operand) != inputMap) {
         return failure();
@@ -68,10 +78,15 @@ struct ElementwiseOpInterchangePattern final
     }
 
     // Make all inputs identity.
+    // 为interchange方法构建传入的interchangeVector。
+    // (d1, d0) -> (d0, d1)
+    // 得到的interchangeVector是[1, 0]
     ArrayRef<AffineExpr> exprs = inputMap.getResults();
     auto perm = llvm::map_to_vector(exprs, [](AffineExpr e) -> unsigned {
       return cast<AffineDimExpr>(e).getPosition();
     });
+
+    // 参考Interchange.cpp，理解interchangeGenericOp具体如何做。
     return linalg::interchangeGenericOp(rewriter, genericOp, perm);
   }
 };
@@ -87,7 +102,7 @@ struct ElementwiseOpInterchangePattern final
 /// %1 = tensor.insert_slice %a into %0
 /// %2 = linalg.fill ins(%cst : )
 /// %3 = tensor.insert_slice %1 into %2
-/// ```
+/// ```2
 ///
 /// to
 ///
@@ -95,23 +110,30 @@ struct ElementwiseOpInterchangePattern final
 /// %2 = linalg.fill ins(%cst : )
 /// %3 = tensor.insert_slice %a into %2
 /// ```
+/// 这个pass的作用是去除不必要的tensor insert操作
 struct FoldSuccessiveTensorInsertSliceOps final
     : public OpRewritePattern<tensor::InsertSliceOp> {
   using OpRewritePattern::OpRewritePattern;
   LogicalResult matchAndRewrite(tensor::InsertSliceOp sliceOp,
                                 PatternRewriter &rewriter) const override {
+    // 从tensor.insert_slice %1获取这个%1的define point
+    // 并判断是否也是tensor.insert_slice。
     auto sourceInsertSlice =
         sliceOp.getSource().getDefiningOp<tensor::InsertSliceOp>();
     if (!sourceInsertSlice) {
       return failure();
     }
+    // 现在的sourceInsertSlice是%1
+    // sourceSliceFillOp是%1=的operation
     auto sourceSliceFillOp =
         sourceInsertSlice.getDest().getDefiningOp<linalg::FillOp>();
+    // destSliceFillOp是%3=的operation
     auto destSliceFillOp = sliceOp.getDest().getDefiningOp<linalg::FillOp>();
     if (!sourceSliceFillOp || !destSliceFillOp) {
       return rewriter.notifyMatchFailure(
           sliceOp, "dest of both insert_slices expected to be fill operations");
     }
+    // 判断两个的基础填充是否一样？只有基础填充一样，才能做变换！！！
     if (sourceSliceFillOp.getDpsInputOperand(0)->get() !=
         destSliceFillOp.getDpsInputOperand(0)->get()) {
       return rewriter.notifyMatchFailure(
@@ -119,6 +141,7 @@ struct FoldSuccessiveTensorInsertSliceOps final
                    "to be fill operation with same value");
     }
 
+    // 这个写法可以学习，快速判断是否tensor是unit stride
     auto isAllConstantOne = [](OpFoldResult ofr) {
       return isConstantIntValue(ofr, 1);
     };
@@ -128,12 +151,18 @@ struct FoldSuccessiveTensorInsertSliceOps final
           sliceOp, "unhandled non-unit strides of slices");
     }
 
+    // affine方法计算源偏移量和目标偏移量的组合映射。
+    // todo: 重点学习仿射映射对于偏移量组合的技巧
     SmallVector<OpFoldResult> sourceSliceOffsets =
         sourceInsertSlice.getMixedOffsets();
     SmallVector<OpFoldResult> destSliceOffsets = sliceOp.getMixedOffsets();
+
+    // 定义d0和d1 两个仿射表达式
     AffineExpr d0, d1;
     bindDims(rewriter.getContext(), d0, d1);
     AffineExpr addExpr = d0 + d1;
+
+    // 理解这个offset是如何计算的。
     SmallVector<OpFoldResult> offsets = llvm::map_to_vector(
         llvm::zip_equal(sourceSliceOffsets, destSliceOffsets), [&](auto it) {
           return affine::makeComposedFoldedAffineApply(
@@ -142,6 +171,7 @@ struct FoldSuccessiveTensorInsertSliceOps final
         });
     SmallVector<OpFoldResult> sizes = sourceInsertSlice.getMixedSizes();
     SmallVector<OpFoldResult> strides(offsets.size(), rewriter.getIndexAttr(1));
+    // 重点是offset，是两重affine映射后的affine映射
     rewriter.replaceOpWithNewOp<tensor::InsertSliceOp>(
         sliceOp, sourceInsertSlice.getSource(), sliceOp.getDest(), offsets,
         sizes, strides);

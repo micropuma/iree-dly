@@ -29,6 +29,8 @@ namespace mlir::iree_compiler::DispatchCreation {
 /// Interpreter pass that applies transform dialect ops for dispatch region
 /// formation. This needs to be its own pass because the registration mechanism
 /// and ops available are different than for other interpreters.
+
+/// 利用transform dialect辅助从linalg dialect中创建dispatch
 namespace {
 struct DispatchWithTransformDialectPass final
     : public impl::DispatchWithTransformDialectPassBase<
@@ -39,6 +41,8 @@ struct DispatchWithTransformDialectPass final
     // Load the module from the spec path. The module will be unloaded once the
     // pass finishes.
     OwningOpRef<ModuleOp> transformModule;
+
+    // 外部文件指导如何transform？
     if (failed(transform::detail::assembleTransformLibraryFromPaths(
             context, transformSpecPath, transformModule)))
       return signalPassFailure();

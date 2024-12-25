@@ -205,6 +205,7 @@ void addDispatchRegionCreationPreprocessingPasses(OpPassManager &passManager) {
 // Pipeline to first create `flow.dispatch.region` ops and then lower to
 // `flow.dispatch.workgroup` ops.
 // Dispatch的核心代码段
+// todo: need a further deep dive
 static void addDispatchRegionCreationPasses(OpPassManager &passManager) {
   FunctionLikeNest(passManager)
       // Only want use the transform dialect for some dispatch regions and let
@@ -212,17 +213,28 @@ static void addDispatchRegionCreationPasses(OpPassManager &passManager) {
       // compute op into the dispatch region, so that we can run additional
       // transformations afterwards with a simple region and without bothering
       // producers.
+      // 理解dispatch机制，一定理解这个pass。
+      // 逻辑是先找到合适的dispatch的root，然后提到dispatch中，经过后续的pass逐渐形成dispatch。
+      // 下面是.td中的描述：
+      // Pass to perform dispatch of Linalg on tensor ops by using the transform
+      // dialect. Dispatch regions are created as specified by the transform module
+      // that is parsed from `transformSpecPath`.
+      // 这个pass一般不操作
       .addPredicatedPass(
           !clDispatchTransformFileName.empty(),
           [&]() {
             DispatchWithTransformDialectPassOptions options;
             options.transformSpecPath = clDispatchTransformFileName;
+
+            // todo: 学习transform dialect，来从tensor dialect中
+            // 找到dispatc点
             return createDispatchWithTransformDialectPass(options);
           })
       // Create dispatches for scalar operations as roots
       .addPass(DispatchCreation::createFormScalarDispatchesPass)
       // Create `flow.dispatch.region` centered around a root and fuse with
       // producers and consumers.
+      // 比较有意思的pass，融合生产者和消费者
       .addPass([&]() {
         return DispatchCreation::createFormDispatchRegionsPass(
             FormDispatchRegionsPassOptions{
@@ -235,6 +247,8 @@ static void addDispatchRegionCreationPasses(OpPassManager &passManager) {
       // afterwards that would need the full dispatch content but don't want to
       // handle explicit captures as materialized as dispatch workgroup operands
       // and block arguments.
+      // 经过上面一步，仍旧有producer因为种种原因在region外，
+      // 通过clone手段，强制放入region中。
       .addPass(DispatchCreation::createCloneProducersIntoDispatchRegionsPass);
 
   // Experimental data tiling path. The intent of this path is to set encodings
@@ -303,19 +317,24 @@ void buildDispatchCreationPassPipeline(
 
   FunctionLikeNest(passManager)
       // Preprocess the input to a form more amenable for fusion.
+      // 理解一下这个FusionPreprocessingPass的作用。
       .addPass(DispatchCreation::createFusionPreprocessingPass)
       .addPass(IREE::Flow::createCanonicalizerPass)
       .addPass(mlir::createCSEPass);
 
+  // todo: 后续可以重点分析
   addDispatchRegionCreationPreprocessingPasses(passManager);
   addDispatchRegionCreationPasses(passManager);
 
   FunctionLikeNest(passManager)
       .addPass(DispatchCreation::createConvertDispatchRegionsToWorkgroupsPass)
+
       // Convert tensor operations to flow.tensor ops.
       // - Convert extract/insert slice to flow update ops when the tensor op
       // acts as a contiguous view of the tensor
       // - Apply tensor -> flow patterns
+      // 生成flow的pass，也是重点。这个pass值得学习，学习如何提出
+      // 从tensor pattern中得到flow patterns
       .addPass(DispatchCreation::createConvertTensorToFlowPass)
       .addPass(createCSEPass)
       .addPass(IREE::Flow::createCanonicalizerPass)
