@@ -35,10 +35,14 @@ struct FormScalarDispatchesPass final
 } // namespace
 
 /// Return true if type represents a value less than `n` elements.
+/// 辅助函数
 static bool isScalarOrTensorOfLinearSizeN(int n, Type type) {
   if (type.isIntOrIndexOrFloat()) {
     return true;
   }
+
+  // 重点是就是针对tensor op，
+  // 需要通过判断tensor op的element的数量。
   if (auto tensorType = dyn_cast<RankedTensorType>(type)) {
     if (!tensorType.hasStaticShape()) {
       return false;
@@ -48,9 +52,14 @@ static bool isScalarOrTensorOfLinearSizeN(int n, Type type) {
   return false;
 }
 
+/// 标记compute operations
 /// Return `true` for operations that are to be treated as compute operations.
 static bool isComputeOperation(Operation *op) {
   MLIRContext *context = op->getContext();
+
+  // 核心逻辑是，所有的LinalgDialect都是computeOperation
+  // TensorDialect中，出个几个个别的operation，均是computeOperation。
+  // 比如tensor::CollapseShapeOp就不是computeOperation
   if (op->getDialect() == context->getLoadedDialect<linalg::LinalgDialect>()) {
     return true;
   }
@@ -61,6 +70,7 @@ static bool isComputeOperation(Operation *op) {
   return false;
 }
 
+/// 判断operation的workload的大小
 /// Return `true` if the workload of this operation is less than `n`.
 static bool isOperationWorkloadLessThanSizeN(int n, Operation *candidateOp) {
   return llvm::all_of(candidateOp->getOperands(),
@@ -75,6 +85,7 @@ static bool isOperationWorkloadLessThanSizeN(int n, Operation *candidateOp) {
 /// Return `true` is the operation is to be treated as a scalar operation
 /// and moved into a scalar dispatch (not necessarily as the root of the
 /// dispatch).
+/// 虽然名字叫scalar operation，但其实tensor of restricted size也是可以的
 static bool isScalarOperation(int workload, Operation *op) {
   // 1. Ignore most operations. Only look for a whitelist set of operations.
   if (!isComputeOperation(op)) {
@@ -89,12 +100,14 @@ static bool isScalarOperation(int workload, Operation *op) {
   // 3. Do not move operations that are cloned into the dispatch region.
   // TODO: This might prevent moving all scalar operations into dispatch
   // resulting in artifical splits. Revisit after more examples.
+  // 根据函数的定义，似乎这条语句的逻辑是找到可以clone的函数
   return !IREE::Flow::isClonableIntoDispatchOp(op);
 }
 
 /// Given a `rootOp` return a DAG of the program that represents
 /// operations that can be moved into a scalar dispatch with the `rootOp`
 /// as the root of the DAG.
+/// 这个函数是整个ScalarDispatch的核心，即
 llvm::SetVector<Operation *> computeSliceToMoveIntoDispatch(
     int workload, Operation *rootOp,
     const llvm::DenseMap<Operation *, Operation *> &opToRootMap) {
@@ -126,12 +139,16 @@ llvm::SetVector<Operation *> computeSliceToMoveIntoDispatch(
 }
 
 /// Return `true` if the op is to be treated as a root of a scalar dispatch.
+/// 这个pass的核心部分是找寻到哪个operation可以作为dispatch region的root来使用。
 static bool isSliceRoot(int workload, Operation *op) {
+  // 一个operation的父亲不是DispatchRegionOp，并且是scalar op
   return !op->getParentOfType<IREE::Flow::DispatchRegionOp>() &&
          isScalarOperation(workload, op);
 }
 
 // Form dispatch regions from slice of the operation.
+// 分析清楚哪些rootOp相关的slice需要归到同一个region
+// 这个函数就是做region construct的
 static FailureOr<IREE::Flow::DispatchRegionOp>
 formDispatchRegionFromSlice(RewriterBase &rewriter, Operation *rootOp,
                             ArrayRef<Operation *> slice) {
@@ -142,6 +159,8 @@ formDispatchRegionFromSlice(RewriterBase &rewriter, Operation *rootOp,
   if (failed(dispatchRegionOp)) {
     return rootOp->emitOpError("failed to form dispatch region with root op");
   }
+
+  // todo：看具体如何把在region之前的一部分operation放入region中
   FailureOr<IREE::Flow::DispatchRegionOp> newDispatchOp =
       movePrecedingOpsIntoDispatchRegion(rewriter, slice,
                                          dispatchRegionOp.value());
@@ -152,6 +171,7 @@ formDispatchRegionFromSlice(RewriterBase &rewriter, Operation *rootOp,
   return newDispatchOp.value();
 }
 
+// 这个pass的函数入口。
 void FormScalarDispatchesPass::runOnOperation() {
   mlir::FunctionOpInterface funcOp = getOperation();
   MLIRContext *context = &getContext();
@@ -159,6 +179,7 @@ void FormScalarDispatchesPass::runOnOperation() {
   int scalarWorkloadLimit = 1;
   // Convenient struct to hold all operations that need to be moved into a
   // descriptor.
+  // 辅助数据结构，维护一个region里的所有operation。
   struct DispatchRegionDescriptor {
     Operation *rootOp;
     SmallVector<Operation *> fusedOps;
@@ -174,10 +195,13 @@ void FormScalarDispatchesPass::runOnOperation() {
       return;
     }
 
+    // scalar只支持int，index，double以及tensor<1>
     if (!isSliceRoot(scalarWorkloadLimit, op)) {
       return;
     }
 
+    // 这段代码就是用computeSliceToMoveIntoDispatch这个函数
+    // 来结算如何分配dispatch
     llvm::SetVector<Operation *> fusedOpsSet =
         computeSliceToMoveIntoDispatch(scalarWorkloadLimit, op, opToRootMap);
     for (Operation *sliceOp : fusedOpsSet) {
@@ -277,6 +301,7 @@ void FormScalarDispatchesPass::runOnOperation() {
       return signalPassFailure();
     }
 
+    // 后续会有对于workgroup count的处理
     // Set the workgroup count to {1, 1, 1} since this is to be executed
     // sequentially (at leats for now)
     Region &countRegion = dispatchRegionOp->getWorkgroupCount();

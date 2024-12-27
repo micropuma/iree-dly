@@ -579,6 +579,7 @@ moveFollowingOpIntoDispatchRegion(RewriterBase &rewriter, Operation *target,
   return newRegionOp.value();
 }
 
+// 根据op生成region
 FailureOr<IREE::Flow::DispatchRegionOp>
 wrapOpInDispatchRegion(RewriterBase &rewriter, Operation *op) {
   OpBuilder::InsertionGuard g(rewriter);
@@ -595,6 +596,7 @@ wrapOpInDispatchRegion(RewriterBase &rewriter, Operation *op) {
       IREE::Flow::makeEmptyDispatchRegion(rewriter, op->getLoc(), workload);
 
   // Move the op into the dispatch region.
+  // 复用已有代码
   auto newRegionOp = movePrecedingOpsIntoDispatchRegion(rewriter, op, regionOp);
 
   if (succeeded(newRegionOp) && useWorkloadCountFromDagRootMode) {

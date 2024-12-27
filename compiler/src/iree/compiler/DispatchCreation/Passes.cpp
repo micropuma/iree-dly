@@ -235,6 +235,8 @@ static void addDispatchRegionCreationPasses(OpPassManager &passManager) {
       // Create `flow.dispatch.region` centered around a root and fuse with
       // producers and consumers.
       // 比较有意思的pass，融合生产者和消费者
+      // 先前的FormScalar是针对scalar op，完全不关心linalg op
+      // 这个重点关注Linalg op
       .addPass([&]() {
         return DispatchCreation::createFormDispatchRegionsPass(
             FormDispatchRegionsPassOptions{
