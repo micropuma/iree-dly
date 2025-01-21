@@ -1,0 +1,23 @@
+{
+    "version": 3,
+    "configurePresets": [
+        {
+            "name": "default",
+            "description": "Default settings for my cmake project",
+            "hidden": false,
+            "generator": "Ninja",  // 使用 Ninja 作为构建系统
+            "binaryDir": "${workspaceFolder}/build",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "YES",
+                "DIREE_TARGET_BACKEND_CUDA": "ON",  // 启用 CUDA 后端
+                "DIREE_ENABLE_ASSERTIONS": "ON",  // 启用断言
+                "CMAKE_CXX_FLAGS": "-Wno-error=dangling-pointer",  // 设置 C++ 编译器标志
+                "DIREE_HAL_DRIVER_CUDA": "ON",  // 启用 CUDA 驱动
+                "DIREE_BUILD_PYTHON_BINDINGS": "ON",  // 构建 Python 绑定
+                "Python3_EXECUTABLE": "/usr/bin/python3",  // 设置 Python3 可执行文件路径
+                "DIREE_CUDA_LIBDEVICE_PATH": "/usr/local/cuda-12.1/nvvm/libdevice/libdevice.10.bc"  // 设置 CUDA libdevice 路径
+            }
+        }
+    ]
+}
