@@ -115,6 +115,7 @@ int mlir::iree_compiler::runIreecMain(int argc, char **argv) {
       llvm::cl::desc("Compilation phase to resume from, starting with the "
                      "following phase."),
       llvm::cl::init(IREEVMPipelinePhase::Start));
+  // 动态注册编译阶段选项，通过获取回调函数提供的三个参数，完成pipeline的注册。
   SmallVector<std::string> compileFromPhases;
   enumerateIREEVMPipelinePhases(
       [&](IREEVMPipelinePhase phase, StringRef name, StringRef desc) {
@@ -158,6 +159,8 @@ int mlir::iree_compiler::runIreecMain(int argc, char **argv) {
       llvm::cl::desc("Split the input file into pieces and "
                      "process each chunk independently."),
       llvm::cl::init(false));
+    
+  // 相比前面的callback写法，这个写法更加简单。
   llvm::cl::opt<bool> listHalTargets(
       "iree-hal-list-target-backends",
       llvm::cl::desc(

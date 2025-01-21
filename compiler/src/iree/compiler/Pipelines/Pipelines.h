@@ -40,6 +40,7 @@ enum class IREEVMPipelinePhase {
   End,
 };
 
+// 利用call back机制，给调用函数提供所有注册信息
 // Enumerates names and descriptions for pipeline phase values.
 inline static void enumerateIREEVMPipelinePhases(
     std::function<void(IREEVMPipelinePhase, StringRef name, StringRef desc)>

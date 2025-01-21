@@ -195,6 +195,7 @@ void buildIREEPrecompileTransformPassPipeline(
         hooks.buildConstEvalPassPipelineCallback;
   }
 
+  // start from here
   switch (schedulingOptions.executionModel) {
   case SchedulingOptions::ExecutionModel::HostOnly:
     // No flow/stream processing (implies no tensors).
@@ -261,6 +262,14 @@ void buildIREEVMTransformPassPipeline(
     IREE::VM::TargetOptions vmTargetOptions, IREEVMPipelineHooks &hooks,
     OpPassManager &passManager, IREEVMPipelinePhase compileFrom,
     IREEVMPipelinePhase compileTo) {
+  /*
+  PrecompileTransform pipeline contains following phases:
+  Start,
+  Input,
+  ABI,
+  Preprocessing,
+  GlobalOptimization,
+  */
   buildIREEPrecompileTransformPassPipeline(
       targetRegistry, bindingOptions, inputOptions, preprocessingOptions,
       globalOptimizationOptions, schedulingOptions, halTargetOptions, hooks,
