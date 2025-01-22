@@ -20,6 +20,7 @@ StableHLO is an operation set for high-level operations (HLO) in machine learnin
 ## Related Project
 1. [OpenXLA](https://openxla.org/stablehlo/awesome)
 2. [IREE](https://github.com/iree-org/iree)
+3. [XLA operation talks](https://zhuanlan.zhihu.com/p/396309457)
 
 
 
