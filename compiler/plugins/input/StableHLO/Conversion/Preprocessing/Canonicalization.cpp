@@ -1150,11 +1150,14 @@ struct ReorderElementwiseAndShapeOp final
   }
 };
 
+// 专门针对StableHLO dialect的正则化
 struct StableHLOCanonicalize final
     : impl::StableHLOCanonicalizeBase<StableHLOCanonicalize> {
   void runOnOperation() override {
     MLIRContext *ctx = &getContext();
     RewritePatternSet patterns(ctx);
+
+    // 这个方法里面含有StableHLO为每一个op编写的正则化match and rewrite机制
     populateCanonicalizationPatterns(ctx, &patterns);
     if (failed(applyPatternsAndFoldGreedily(getOperation(),
                                             std::move(patterns)))) {
@@ -1168,6 +1171,8 @@ struct StableHLOCanonicalize final
 };
 
 } // namespace
+
+// 正则化添加模版
 void populateCanonicalizationPatterns(MLIRContext *context,
                                       RewritePatternSet *patterns,
                                       PatternBenefit benefit) {
