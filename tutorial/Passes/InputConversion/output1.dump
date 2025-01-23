@@ -1,0 +1,4 @@
+scalar-tensorfrom.mlir:4:8: error: Dialect `mhlo' not found for custom op 'mhlo.add' 
+  %2 = mhlo.add %0, %1 : tensor<1xf32>
+       ^
+scalar-tensorfrom.mlir:4:8: note: Registered dialects: affine, amdgpu, arith, arm_neon, arm_sme, arm_sve, bufferization, builtin, cf, check, chlo, complex, emitc, flow, func, gpu, hal, hal_inline, hal_loader, io_parameters, iree_codegen, iree_encoding, iree_gpu, iree_input, iree_linalg_ext, iree_vector_ext, linalg, llvm, math, memref, mesh, ml_program, nvgpu, pdl, pdl_interp, quant, rocdl, scf, shape, spirv, stablehlo, stream, tensor, tm_tensor, torch, torch_c, tosa, transform, util, vector, vhlo, vm, vmvx ; for more info on dialect registration see https://mlir.llvm.org/getting_started/Faq/#registered-loaded-dependent-whats-up-with-dialects-management

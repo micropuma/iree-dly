@@ -99,7 +99,7 @@ module {
   }
 }
 
-
+=======================================================================================================
 // -----// IR Dump After StableHLOToStableHLOPreprocessing (iree-stablehlo-to-stablehlo-preprocessing) //----- //
 module {
   func.func @main(%arg0: tensor<28x28xf32>, %arg1: tensor<784x10xf32>, %arg2: tensor<1x10xf32>) -> tensor<1x10xf32> {
@@ -136,6 +136,7 @@ func.func @main(%arg0: tensor<28x28xf32>, %arg1: tensor<784x10xf32>, %arg2: tens
   return %4 : tensor<1x10xf32>
 }
 
+=======================================================================================================
 // -----// IR Dump After ConvertShapeToStandard (convert-shape-to-std) //----- //
 module {
   func.func @main(%arg0: tensor<28x28xf32>, %arg1: tensor<784x10xf32>, %arg2: tensor<1x10xf32>) -> tensor<1x10xf32> {
@@ -241,6 +242,7 @@ func.func @main(%arg0: tensor<28x28xf32>, %arg1: tensor<784x10xf32>, %arg2: tens
   return %4 : tensor<1x10xf32>
 }
 
+=======================================================================================================
 // -----// IR Dump After ConvertStableHloToLinalgExt (iree-stablehlo-to-linalg-ext) //----- //
 func.func @main(%arg0: tensor<28x28xf32>, %arg1: tensor<784x10xf32>, %arg2: tensor<1x10xf32>) -> tensor<1x10xf32> {
   %cst = stablehlo.constant dense<0.000000e+00> : tensor<1x10xf32>
@@ -263,6 +265,8 @@ func.func @main(%arg0: tensor<28x28xf32>, %arg1: tensor<784x10xf32>, %arg2: tens
   return %4 : tensor<1x10xf32>
 }
 
+=======================================================================================================
+=================================== 将StableHLO转到Linalg On Tensor ===================================
 // -----// IR Dump After ConvertStableHloToIreeInputDialects (iree-stablehlo-to-iree-input) //----- //
 #map = affine_map<(d0, d1) -> (d0, d1)>
 module {
@@ -290,7 +294,7 @@ module {
   }
 }
 
-
+=======================================================================================================
 // -----// IR Dump After ReconcileUnrealizedCasts (reconcile-unrealized-casts) //----- //
 #map = affine_map<(d0, d1) -> (d0, d1)>
 module {
@@ -394,7 +398,7 @@ module {
   }
 }
 
-
+=======================================================================================================
 // -----// IR Dump After IREEImportPublicPass (iree-import-public) //----- //
 #map = affine_map<(d0, d1) -> (d0, d1)>
 module {
@@ -422,7 +426,7 @@ module {
   }
 }
 
-
+=======================================================================================================
 // -----// IR Dump After ImportMLProgramPass (iree-import-ml-program) //----- //
 #map = affine_map<(d0, d1) -> (d0, d1)>
 module {
@@ -506,7 +510,7 @@ module {
   }
 }
 
-
+==============================================================================================================
 // -----// IR Dump After DemoteF64ToF32Pass (iree-input-conversion-demote-f64-to-f32) //----- //
 #map = affine_map<(d0, d1) -> (d0, d1)>
 module {
@@ -562,7 +566,7 @@ module {
   }
 }
 
-
+=======================================================================================================
 // -----// IR Dump After mlir::iree_compiler::IREE::ABI::WrapEntryPointsPass (iree-abi-wrap-entry-points) //----- //
 #map = affine_map<(d0, d1) -> (d0, d1)>
 module {
@@ -1083,6 +1087,7 @@ util.func public @main(%arg0: !hal.buffer_view, %arg1: !hal.buffer_view, %arg2: 
   util.return %9 : !hal.buffer_view
 }
 
+==============================================================================================================================
 // -----// IR Dump After DetachElementwiseFromNamedOpsPass (iree-global-opt-detach-elementwise-from-named-ops) //----- //
 util.func public @main(%arg0: !hal.buffer_view, %arg1: !hal.buffer_view, %arg2: !hal.buffer_view) -> !hal.buffer_view attributes {iree.abi.stub, iree.reflection = {iree.abi.declaration = "sync func @main(%input0: tensor<28x28xf32>, %input1: tensor<784x10xf32>, %input2: tensor<1x10xf32>) -> (%output0: tensor<1x10xf32>)"}} {
   %cst = arith.constant dense<0.000000e+00> : tensor<1x10xf32>
@@ -1171,6 +1176,7 @@ module attributes {stream.affinity.default = #hal.device.affinity<@__device_0>} 
 }
 
 
+=========================================================================================================================
 // -----// IR Dump After ExpandTensorShapesPass (iree-global-opt-expand-tensor-shapes) //----- //
 #executable_target_cuda_nvptx_fb = #hal.executable.target<"cuda", "cuda-nvptx-fb", {iree.gpu.target = #iree_gpu.target<arch = "sm_86", features = "+ptx76", wgp = <compute =  fp64|fp32|fp16|int64|int32|int16|int8, storage =  b64|b32|b16|b8, subgroup =  shuffle|arithmetic, dot =  dp4xi8toi32, mma = [<WMMA_F32_16x16x16_F16>, <WMMA_F16_16x16x16_F16>], subgroup_size_choices = [32], max_workgroup_sizes = [1024, 1024, 1024], max_thread_count_per_workgroup = 1024, max_workgroup_memory_bytes = 166912, max_workgroup_counts = [2147483647, 65535, 65535]>>}>
 #map = affine_map<(d0, d1) -> (d0, d1)>
@@ -1204,7 +1210,7 @@ module attributes {stream.affinity.default = #hal.device.affinity<@__device_0>} 
   }
 }
 
-
+=====================================================================================================================
 // -----// IR Dump After ConvertElementwiseToLinalgPass (convert-elementwise-to-linalg) //----- //
 util.func public @main(%arg0: !hal.buffer_view, %arg1: !hal.buffer_view, %arg2: !hal.buffer_view) -> !hal.buffer_view attributes {iree.abi.stub, iree.reflection = {iree.abi.declaration = "sync func @main(%input0: tensor<28x28xf32>, %input1: tensor<784x10xf32>, %input2: tensor<1x10xf32>) -> (%output0: tensor<1x10xf32>)"}} {
   %cst = arith.constant dense<0.000000e+00> : tensor<1x10xf32>
@@ -2227,6 +2233,7 @@ util.func public @main(%arg0: !hal.buffer_view, %arg1: !hal.buffer_view, %arg2: 
   util.return %8 : !hal.buffer_view
 }
 
+===================================================================================================================================
 // -----// IR Dump After TensorPadToTensorInsertSlicePass (iree-dispatch-creation-tensor-pad-to-tensor-insert-slice) //----- //
 #executable_target_cuda_nvptx_fb = #hal.executable.target<"cuda", "cuda-nvptx-fb", {iree.gpu.target = #iree_gpu.target<arch = "sm_86", features = "+ptx76", wgp = <compute =  fp64|fp32|fp16|int64|int32|int16|int8, storage =  b64|b32|b16|b8, subgroup =  shuffle|arithmetic, dot =  dp4xi8toi32, mma = [<WMMA_F32_16x16x16_F16>, <WMMA_F16_16x16x16_F16>], subgroup_size_choices = [32], max_workgroup_sizes = [1024, 1024, 1024], max_thread_count_per_workgroup = 1024, max_workgroup_memory_bytes = 166912, max_workgroup_counts = [2147483647, 65535, 65535]>>}>
 #map = affine_map<(d0) -> (d0)>
@@ -2940,6 +2947,7 @@ util.func public @main(%arg0: !hal.buffer_view, %arg1: !hal.buffer_view, %arg2: 
   util.return %7 : !hal.buffer_view
 }
 
+============================================================================================================================
 // -----// IR Dump After SplitReductionPass (iree-dispatch-creation-split-reduction-ops) //----- //
 util.func public @main(%arg0: !hal.buffer_view, %arg1: !hal.buffer_view, %arg2: !hal.buffer_view) -> !hal.buffer_view attributes {iree.abi.stub, iree.reflection = {iree.abi.declaration = "sync func @main(%input0: tensor<28x28xf32>, %input1: tensor<784x10xf32>, %input2: tensor<1x10xf32>) -> (%output0: tensor<1x10xf32>)"}} {
   %cst = arith.constant 0.000000e+00 : f32
@@ -3006,6 +3014,8 @@ util.func public @main(%arg0: !hal.buffer_view, %arg1: !hal.buffer_view, %arg2: 
   util.return %7 : !hal.buffer_view
 }
 
+=====================================================================================================
+// todo: Dipstach
 // -----// IR Dump After FormDispatchRegionsPass (iree-dispatch-creation-form-dispatch-regions) //----- //
 util.func public @main(%arg0: !hal.buffer_view, %arg1: !hal.buffer_view, %arg2: !hal.buffer_view) -> !hal.buffer_view attributes {iree.abi.stub, iree.reflection = {iree.abi.declaration = "sync func @main(%input0: tensor<28x28xf32>, %input1: tensor<784x10xf32>, %input2: tensor<1x10xf32>) -> (%output0: tensor<1x10xf32>)"}} {
   %cst = arith.constant 0.000000e+00 : f32
@@ -3085,6 +3095,8 @@ util.func public @main(%arg0: !hal.buffer_view, %arg1: !hal.buffer_view, %arg2: 
   util.return %5 : !hal.buffer_view
 }
 
+===========================================================================================================================================
+// todo: dispatch
 // -----// IR Dump After ConvertDispatchRegionsToWorkgroupsPass (iree-dispatch-creation-convert-dispatch-regions-to-workgroups) //----- //
 util.func public @main(%arg0: !hal.buffer_view, %arg1: !hal.buffer_view, %arg2: !hal.buffer_view) -> !hal.buffer_view attributes {iree.abi.stub, iree.reflection = {iree.abi.declaration = "sync func @main(%input0: tensor<28x28xf32>, %input1: tensor<784x10xf32>, %input2: tensor<1x10xf32>) -> (%output0: tensor<1x10xf32>)"}} {
   %cst = arith.constant 0.000000e+00 : f32
@@ -3451,7 +3463,8 @@ module attributes {stream.affinity.default = #hal.device.affinity<@__device_0>} 
   }
 }
 
-
+===============================================================================================================================
+// todo: Dispatch
 // -----// IR Dump After OutlineDispatchRegionsPass (iree-flow-outline-dispatch-regions) //----- //
 #executable_target_cuda_nvptx_fb = #hal.executable.target<"cuda", "cuda-nvptx-fb", {iree.gpu.target = #iree_gpu.target<arch = "sm_86", features = "+ptx76", wgp = <compute =  fp64|fp32|fp16|int64|int32|int16|int8, storage =  b64|b32|b16|b8, subgroup =  shuffle|arithmetic, dot =  dp4xi8toi32, mma = [<WMMA_F32_16x16x16_F16>, <WMMA_F16_16x16x16_F16>], subgroup_size_choices = [32], max_workgroup_sizes = [1024, 1024, 1024], max_thread_count_per_workgroup = 1024, max_workgroup_memory_bytes = 166912, max_workgroup_counts = [2147483647, 65535, 65535]>>}>
 #map = affine_map<(d0) -> (d0)>
