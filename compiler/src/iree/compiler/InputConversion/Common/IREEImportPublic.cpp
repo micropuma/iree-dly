@@ -32,6 +32,7 @@ namespace {
 class IREEImportPublicPass final
     : public impl::IREEImportPublicPassBase<IREEImportPublicPass> {
 public:
+  // 只有Flow，Input，HAL和standard这几个dialect是合法dialect
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<IREE::Input::IREEInputDialect, IREE::Flow::FlowDialect,
                     IREE::HAL::HALDialect, IREE::Util::UtilDialect,
