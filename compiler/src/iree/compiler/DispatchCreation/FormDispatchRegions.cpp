@@ -77,6 +77,8 @@ static void setRootAttribute(MLIRContext *context, Operation *op,
 static int64_t getRootNumber(Operation *op) {
   return op->getAttrOfType<IntegerAttr>(kRootOpAttr).getInt();
 }
+
+/// 已经被fustion了，不可能再做root节点了。
 /// Returns true if an op is part of a fusion group.
 static bool hasFusionGroupsAttribute(Operation *op) {
   return static_cast<bool>(op->getAttrOfType<ArrayAttr>(kFusionGroupsAttr));
@@ -84,6 +86,8 @@ static bool hasFusionGroupsAttribute(Operation *op) {
 /// Returns the fusion groups for the given `op`.
 static SmallVector<int64_t, 1> getFusionGroups(Operation *op) {
   SmallVector<int64_t, 1> fusionGroups = {};
+
+  // 一个op可以有好多个fusion group
   if (auto fusionGroupsAttr = op->getAttrOfType<ArrayAttr>(kFusionGroupsAttr)) {
     fusionGroups = llvm::map_to_vector(fusionGroupsAttr, [](Attribute attr) {
       return llvm::cast<IntegerAttr>(attr).getInt();
@@ -143,6 +147,7 @@ static bool hasNoPackedReductionDimensions(linalg::LinalgOp linalgOp,
 }
 
 /// Returns true if the linalgOp is fusable with an unpack producer
+/// 用于判断一个 linalg::LinalgOp 是否可以与某个 tensor::UnPackOp 操作的生产者融合。
 static bool hasFusableUnpackProducer(linalg::LinalgOp linalgOp) {
   return llvm::any_of(linalgOp->getOperands(), [&](Value operand) {
     auto producer = operand.getDefiningOp<tensor::UnPackOp>();
@@ -150,9 +155,11 @@ static bool hasFusableUnpackProducer(linalg::LinalgOp linalgOp) {
   });
 }
 
+/// 这个helper function辅助判断哪些operation可以被当做root operation
 /// Operations that are treated as root operations for dispatch region
 /// formation.
 static bool isRootOp(Operation *op) {
+  // 该operation没有在任何一个DispatchWorkgroups中
   if (op->getParentOfType<IREE::Flow::DispatchWorkgroupsOp>()) {
     return false;
   }
@@ -162,6 +169,8 @@ static bool isRootOp(Operation *op) {
   }
   // Any Linalg named op or generic op with reduction iterator types is a root
   // op.
+  // 1. Linalg named op 
+  // 2. Linalg generic op + has reduction
   if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
     if (isa<linalg::GenericOp>(op)) {
       return linalgOp.getNumReductionLoops() != 0 &&
@@ -766,6 +775,7 @@ fuseRootsWithProducers(MLIRContext *context, Operation *root, unsigned groupNum,
 /// be marked to fuse with multiple root operations (i.e. replicated). For now a
 /// very simple heuristic is used below, but the mechanism should be general
 /// enough to capture any heuristic.
+/// 启发式算法，决定fuse链条
 static unsigned
 decideFusableLinalgOps(Region &region, DominanceInfo const &dominanceInfo,
                        FormDispatchRegionsPassOptions const &options,
@@ -838,6 +848,7 @@ decideFusableLinalgOps(Region &region, DominanceInfo const &dominanceInfo,
 // Dispatch region formation
 //===----------------------------------------------------------------------===//
 
+// Dispatch region formation功能的核心函数
 /// Create IREE::Flow::DispatchGroupsOps based on a fusion heuristic.
 static LogicalResult
 createFusionGroups(TensorDimTrackingRewriter &rewriter,
@@ -941,6 +952,7 @@ struct FormDispatchRegionsPass final
 };
 } // namespace
 
+// 整个pass的入口函数
 /// Create dispatch.region Ops based on a fusion heuristic.
 void FormDispatchRegionsPass::runOnOperation() {
   mlir::FunctionOpInterface funcOp = getOperation();

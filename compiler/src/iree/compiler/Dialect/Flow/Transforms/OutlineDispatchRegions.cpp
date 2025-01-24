@@ -178,6 +178,8 @@ struct OutlineDispatchRegionsPass
 
       // Outline all of the dispatch regions ops in this function.
       SmallVector<Operation *> deadOps;
+
+      // 定义一个lambda函数，起名字叫outlineOps
       auto outlineOps = [&](Operation *op) {
         return TypeSwitch<Operation *, WalkResult>(op)
             .Case<IREE::Flow::DispatchWorkgroupsOp>(
