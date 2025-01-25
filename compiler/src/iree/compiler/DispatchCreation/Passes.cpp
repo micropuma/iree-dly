@@ -100,6 +100,7 @@ namespace mlir::iree_compiler::DispatchCreation {
 using FunctionLikeNest =
     MultiOpNest<func::FuncOp, IREE::Util::InitializerOp, IREE::Util::FuncOp>;
 
+// CleanupPatterns是在运行每一组pass之后用于清理无用代码的passs。
 static void addCleanupPatterns(OpPassManager &passManager) {
   FunctionLikeNest(passManager)
       // Standard MLIR cleanup.
@@ -128,7 +129,11 @@ static void addCleanupPatterns(OpPassManager &passManager) {
 // Pipelines
 //===----------------------------------------------------------------------===//
 
+// 做dispatch creation步骤的前期准备
 void addDispatchRegionCreationPreprocessingPasses(OpPassManager &passManager) {
+  // 从pass的用法上，一般有如下结构：
+  // 首先是我们想要做的pass优化
+  // 然后是Canonicalize以及CSE等通用优化pass
   // 1. Do some simple elementwise op fusion. This could be skipped,
   //    but could reduce the surface area of ops to handle later.
   FunctionLikeNest(passManager)
@@ -143,6 +148,8 @@ void addDispatchRegionCreationPreprocessingPasses(OpPassManager &passManager) {
       // 2. Bubble up expand_shape ops (or sink collapse_shape ops) to get
       //    elementwise operation into higher dimensions for more fusion
       //    opportunities.
+      // （1）如果某个expand_shape在elementwise操作之后，则提升这个expand_shape操作。
+      // （2）如果某个collapse操作在elementwise操作之前，则下降这个collapse操作。
       .addPass(DispatchCreation::createBubbleUpExpandShapesPass)
       .addPass(DispatchCreation::createBubbleUpExtractSlicesPass)
       .addPass(IREE::Flow::createCanonicalizerPass)
@@ -160,10 +167,13 @@ void addDispatchRegionCreationPreprocessingPasses(OpPassManager &passManager) {
 
       // 4. After elementwise operation fusion sink reshapes that block
       //    producer-consumer fusion.
+      // 将reshapes op下降，以免切断了producer-consumer模式
       .addPass(DispatchCreation::createSinkReshapesPass)
       .addPass(IREE::Flow::createCanonicalizerPass)
       .addPass(mlir::createCSEPass);
 
+  // 做水平方向上的收缩操作，目前理解是：
+  // A = BxC，D = ExF，那么可以把两者融合为一个矩阵计算？
   if (clEnableFuseHorizontalContractions) {
     FunctionLikeNest(passManager)
         .addPass(createFuseHorizontalContractionsPass)
@@ -179,6 +189,7 @@ void addDispatchRegionCreationPreprocessingPasses(OpPassManager &passManager) {
       // 6. Some more "post elementwise fusion passes".
       //    a. Detensorize.
       //       TODO: This is probably not in the right place.
+      // 这几个pass的写法，都是只有clDetensoring为true，才执行pass
       .addPredicatedPass(clDetensoring,
                          [&]() { return mlir::createLinalgDetensorizePass(); })
       .addPass(IREE::Flow::createCanonicalizerPass)
@@ -188,6 +199,8 @@ void addDispatchRegionCreationPreprocessingPasses(OpPassManager &passManager) {
       //       reduction dimension.
       //       TODO: This pass is only needed till all backends can handle
       //       multiple reduction dimensions.
+      // 这个pass的作用是针对hardware不支持多维度归约情况（reduce-max），
+      // 通过collapse操作，将维度下降到hardware支持归约的维度情况。
       .addPredicatedPass(
           clCollapseReductionDims,
           DispatchCreation::createCollapseReductionDimensionsPass)
@@ -199,13 +212,14 @@ void addDispatchRegionCreationPreprocessingPasses(OpPassManager &passManager) {
       //     d. Transpose generic ops to
       //        - help with dispatch region formation.
       //        - move reduction iterators to be innermost.
+      // 对于Linalg.generic op做进一步的处理，方便后续的dispatch生成。
+      // 该pass重点是将reduction iteration type放在循环的最内层。
       .addPass(DispatchCreation::createTransposeGenericOpsPass);
 }
 
 // Pipeline to first create `flow.dispatch.region` ops and then lower to
 // `flow.dispatch.workgroup` ops.
 // Dispatch的核心代码段
-// todo: need a further deep dive
 static void addDispatchRegionCreationPasses(OpPassManager &passManager) {
   FunctionLikeNest(passManager)
       // Only want use the transform dialect for some dispatch regions and let
@@ -227,7 +241,9 @@ static void addDispatchRegionCreationPasses(OpPassManager &passManager) {
             options.transformSpecPath = clDispatchTransformFileName;
 
             // todo: 学习transform dialect，来从tensor dialect中
-            // 找到dispatc点
+            // 找到dispatch的anchor point。
+            // 这个pass默认是不开启的，这个pass可以方便用户自定义transform dialect，
+            // 来自定义dispatch生成模型。
             return createDispatchWithTransformDialectPass(options);
           })
       // Create dispatches for scalar operations as roots
@@ -235,7 +251,7 @@ static void addDispatchRegionCreationPasses(OpPassManager &passManager) {
       // Create `flow.dispatch.region` centered around a root and fuse with
       // producers and consumers.
       // 比较有意思的pass，融合生产者和消费者
-      // 先前的FormScalar是针对scalar op，完全不关心linalg op
+      // 先前的FormScalar没有处理<tensor>，只处理<tensor1xf>等scalar tensor
       // 这个重点关注Linalg op
       .addPass([&]() {
         return DispatchCreation::createFormDispatchRegionsPass(
@@ -249,10 +265,15 @@ static void addDispatchRegionCreationPasses(OpPassManager &passManager) {
       // afterwards that would need the full dispatch content but don't want to
       // handle explicit captures as materialized as dispatch workgroup operands
       // and block arguments.
-      // 经过上面一步，仍旧有producer因为种种原因在region外，
-      // 通过clone手段，强制放入region中。
+      // 下面是详细的description：
+      // let description = [{
+      // Pass to clone into dispatch regions producers of values used in the dispatch
+      // regions but defined in the above. This prepares the dispatch regions for
+      // converting to dispatch workgroups with explicit captures.
+      // }];
       .addPass(DispatchCreation::createCloneProducersIntoDispatchRegionsPass);
 
+  // 这是实验性的data tiling pass
   // Experimental data tiling path. The intent of this path is to set encodings
   // after fusion decisions have already been made, so encodings can be
   // separated from compiler fusion decisions.
@@ -328,6 +349,8 @@ void buildDispatchCreationPassPipeline(
   addDispatchRegionCreationPreprocessingPasses(passManager);
   addDispatchRegionCreationPasses(passManager);
 
+  // 划分好dispatch后，将dispatch变成workgroups
+  // 与AIE的tile划分十分类似
   FunctionLikeNest(passManager)
       .addPass(DispatchCreation::createConvertDispatchRegionsToWorkgroupsPass)
 
