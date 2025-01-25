@@ -30,6 +30,9 @@ struct CloneProducersIntoDispatchRegionsPass final
     IRRewriter rewriter(funcOp->getContext());
 
     funcOp->walk([&](IREE::Flow::DispatchRegionOp regionOp) {
+      // iree提供regions util，支持实现cloneProducersToRegion
+      // 底层会判断哪些operations可以被clone
+      // 一般要求operation不能带来side effects。
       if (failed(cloneProducersToRegion(rewriter, regionOp)))
         return signalPassFailure();
     });

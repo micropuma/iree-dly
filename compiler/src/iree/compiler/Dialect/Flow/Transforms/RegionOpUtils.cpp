@@ -116,6 +116,8 @@ bool isNonNullAndOutsideDispatch(Operation *op) {
   if (!op)
     return false;
   Operation *parentOp = op->getParentOp();
+
+  // 学习LLVM的isa写法
   while (parentOp) {
     if (isa<IREE::Flow::DispatchRegionOp, IREE::Flow::DispatchWorkgroupsOp>(
             parentOp)) {
@@ -794,6 +796,9 @@ FailureOr<Operation *> hoistOutOfDispatch(RewriterBase &rewriter,
 
 /// Operations that are cloned into dispatch regions formed with other
 /// operations as roots.
+/// regions 相关的utils，用来判断一个operation
+/// 是否可以clone进dispatch regions
+/// 在FormScalarDispatches等pass中使用到。
 bool isClonableIntoDispatchOp(Operation *op) {
   // TODO(#8637): `tensor.collapse_shape` and `tensor.expand_shape` are
   // trivially clonable too, but they cause problems
@@ -876,6 +881,10 @@ static bool hasUnfusableUseInDispatch(Value v, Operation *dispatchOp) {
   return false;
 }
 
+// 这个helper function的目标是找到在dispatch region中使用，但是在
+// dispatch region外定义的values
+// 并尝试将这个clone进dispatch regions中
+// 返回一个SetVector<Value>集合，包括所有defined above values
 SmallVector<Operation *>
 getCloneableOps(IREE::Flow::DispatchRegionOp regionOp) {
   // Find values that are used inside of the dispatch region but defined outside
