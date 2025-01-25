@@ -151,11 +151,14 @@ struct ConvertTensorToFlowPass
 };
 } // namespace
 
+/// Entry point
 void ConvertTensorToFlowPass::runOnOperation() {
   mlir::FunctionOpInterface funcOp = getOperation();
   mlir::TensorDimTrackingRewriter rewriter(funcOp);
   mlir::MLIRContext *context = &getContext();
 
+  // tensor2flow 这个pass在workgroup convert这个pass的后面
+  // 这种写法是LLVM常用写法了
   auto workgroupsOps = SmallVector<IREE::Flow::DispatchWorkgroupsOp>();
   funcOp->walk([&](IREE::Flow::DispatchWorkgroupsOp workgroupsOp) {
     workgroupsOps.push_back(workgroupsOp);

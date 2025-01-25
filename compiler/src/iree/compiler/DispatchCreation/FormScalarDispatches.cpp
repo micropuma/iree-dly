@@ -44,6 +44,7 @@ static bool isScalarOrTensorOfLinearSizeN(int n, Type type) {
   // 重点是就是针对tensor op，
   // 需要通过判断tensor op的element的数量。
   if (auto tensorType = dyn_cast<RankedTensorType>(type)) {
+    // dispatch流程不支持动态shape
     if (!tensorType.hasStaticShape()) {
       return false;
     }
@@ -58,7 +59,7 @@ static bool isComputeOperation(Operation *op) {
   MLIRContext *context = op->getContext();
 
   // 核心逻辑是，所有的LinalgDialect都是computeOperation
-  // TensorDialect中，出个几个个别的operation，均是computeOperation。
+  // TensorDialect中，除了个别的operation，均是computeOperation。
   // 比如tensor::CollapseShapeOp就不是computeOperation
   if (op->getDialect() == context->getLoadedDialect<linalg::LinalgDialect>()) {
     return true;
@@ -107,11 +108,19 @@ static bool isScalarOperation(int workload, Operation *op) {
 /// Given a `rootOp` return a DAG of the program that represents
 /// operations that can be moved into a scalar dispatch with the `rootOp`
 /// as the root of the DAG.
-/// 这个函数是整个ScalarDispatch的核心，即
+/// 这个函数是整个ScalarDispatch的核心，对于给定的rootOp，
+/// 用一个map存储所有和该rootOp划分到同一个dispatch region的operations
 llvm::SetVector<Operation *> computeSliceToMoveIntoDispatch(
     int workload, Operation *rootOp,
     const llvm::DenseMap<Operation *, Operation *> &opToRootMap) {
   BackwardSliceOptions options;
+
+  // 定义filter辅助函数
+  // 该filter有如下过滤条件：
+  // 1. 必须是scalar op（基础op + tensor<1> op）
+  // 2. 该op的所有user已经放入rootOp的dispatch候选
+  // 3. 该op必须和rootOp在同一block，不可跨越block
+  // 4. 该op还没有加入任何一个dispatch
   options.filter = [&](Operation *currentOp) {
     assert(currentOp && "current op is null");
     if (opToRootMap.count(currentOp)) {
@@ -134,6 +143,8 @@ llvm::SetVector<Operation *> computeSliceToMoveIntoDispatch(
   };
   options.omitBlockArguments = true;
   llvm::SetVector<Operation *> slice;
+
+  // 基于先前定义好的filter，对于currentOp做backward slice analysis
   getBackwardSlice(rootOp, &slice, options);
   return slice;
 }
@@ -147,8 +158,7 @@ static bool isSliceRoot(int workload, Operation *op) {
 }
 
 // Form dispatch regions from slice of the operation.
-// 分析清楚哪些rootOp相关的slice需要归到同一个region
-// 这个函数就是做region construct的
+// 基于分析出来的rootOp，构建Flow::DispatchRegionOp
 static FailureOr<IREE::Flow::DispatchRegionOp>
 formDispatchRegionFromSlice(RewriterBase &rewriter, Operation *rootOp,
                             ArrayRef<Operation *> slice) {
@@ -160,7 +170,7 @@ formDispatchRegionFromSlice(RewriterBase &rewriter, Operation *rootOp,
     return rootOp->emitOpError("failed to form dispatch region with root op");
   }
 
-  // todo：看具体如何把在region之前的一部分operation放入region中
+  // todo：这个操作的核心是slice是如何计算出来的。
   FailureOr<IREE::Flow::DispatchRegionOp> newDispatchOp =
       movePrecedingOpsIntoDispatchRegion(rewriter, slice,
                                          dispatchRegionOp.value());
@@ -188,6 +198,8 @@ void FormScalarDispatchesPass::runOnOperation() {
   SmallVector<DispatchRegionDescriptor> dispatches;
   llvm::DenseMap<Operation *, Operation *> opToRootMap;
 
+  // 使用逆后序遍历，是compiler遍历计算图的常用方式
+  // 可以保证能够按照循环依赖的方式遍历
   // Walk the function in postorder, reverse orded ignore all operations
   // not immediately nested within the `funcOp`.
   funcOp.walk<WalkOrder::PostOrder, ReverseIterator>([&](Operation *op) {
@@ -202,16 +214,25 @@ void FormScalarDispatchesPass::runOnOperation() {
 
     // 这段代码就是用computeSliceToMoveIntoDispatch这个函数
     // 来结算如何分配dispatch
+    // fusedOpsSet中存储好能够跟rootOp fuse到一个dispatch region的operations
+    // 这个函数主要依靠backward slice反向切片技术，来
+    // 尝试找到fuse的candidates
+    // backward slice技术是找寻所有rootOp的def传递链条，搭配上
+    // filter的过滤限制，得到可以fuse到一个region的operation集和。
     llvm::SetVector<Operation *> fusedOpsSet =
         computeSliceToMoveIntoDispatch(scalarWorkloadLimit, op, opToRootMap);
     for (Operation *sliceOp : fusedOpsSet) {
       assert(!opToRootMap.count(sliceOp) &&
              "trying to add same op to two dispatches");
+      // 添加得到的fusedOpsSet到rootOp的dispatch region中
+      // 这个fuse是比较强条件的fuse
+      // 要求currentOp和rootOp必须是def-use链条关系
       opToRootMap[sliceOp] = op;
     }
 
     // Iterate backwards within the block to get ops that dont necessarily
     // have producer -> consumer relationship but can still be fused.
+    // 先前做好了producer-consumer的融合，这里尝试进行水平融合。
     Block *currBlock = op->getBlock();
     Operation *prevOp = op;
     bool didHorizontalFusion = false;
@@ -237,6 +258,9 @@ void FormScalarDispatchesPass::runOnOperation() {
         // used by this op cannot be horizontally fused
         // Insert all operations into the set that define op's operands or
         // define values used inside of op's regions
+        // 一个operation是不可以融合的
+        // 则该operation的region中使用到的values的def也不可以融合
+        // 该operation的operands的def也不可以融合
         mlir::visitUsedValuesDefinedAbove(
             prevOp->getRegions(), [&](OpOperand *operand) {
               if (auto definingOp = operand->get().getDefiningOp()) {
@@ -265,6 +289,7 @@ void FormScalarDispatchesPass::runOnOperation() {
       fusedOpsSet.insert(currSlice.begin(), currSlice.end());
     }
 
+    // 创建dispatch discriptor（一个smallvector)
     DispatchRegionDescriptor &currDispatch =
         dispatches.emplace_back(DispatchRegionDescriptor{});
     currDispatch.rootOp = op;
@@ -289,6 +314,7 @@ void FormScalarDispatchesPass::runOnOperation() {
     }
   });
 
+  // 基于前面做好的dispatch分析，做rewriter改写
   IRRewriter rewriter(context);
   for (auto &currDispatch : dispatches) {
     rewriter.setInsertionPoint(currDispatch.rootOp);

@@ -38,9 +38,19 @@ struct ConvertDispatchRegionsToWorkgroupsPass
 
 // Creates a DispatchWorkgroupsOp for every DispatchRegionOp.
 void ConvertDispatchRegionsToWorkgroupsPass::runOnOperation() {
+  // mlir编写的方法：
+  // 获取想要runOn的operation类型
+  // 定义rewriter，并传入operation类型
   FunctionOpInterface funcOp = getOperation();
+  /// Simplfy the given tensor::DimOps as much as possible.
+  /// * Static dimensions are replaced by constant.
+  /// * Dynamic dim ops are pushed as much as possible to the top of the function,
+  ///   i.e., if the dim of a value is known to be equal to the dim of a value on
+  ///   the reverse SSA use-def chain, rewrite the value with a dim op of that
+  ///   value.
   TensorDimTrackingRewriter rewriter(funcOp);
 
+// 用一个SmallVector存储funOp里面出现的所有Flow::DispatchRegionOp
   SmallVector<IREE::Flow::DispatchRegionOp> regionOps;
   funcOp.walk(
       [&](IREE::Flow::DispatchRegionOp op) { regionOps.push_back(op); });
@@ -49,6 +59,7 @@ void ConvertDispatchRegionsToWorkgroupsPass::runOnOperation() {
 
   // Clone additional producers and rewrite to DispatchWorkgroupsOp.
   for (auto regionOp : regionOps) {
+    // dispatch to workgroup的核心算法
     auto maybeWorkgroupOp =
         rewriteFlowDispatchRegionToFlowDispatchWorkgroups(regionOp, rewriter);
     if (failed(maybeWorkgroupOp)) {
