@@ -26,6 +26,7 @@ static void appendDynamicDims(OpBuilder &b, Location loc,
 
   // Fast-path for if the value comes from ops that support our dynamic
   // shape interfaces. Otherwise we have to insert tensor.dim ops.
+  // findDynamicDims是IREE提供的util工具，支持循着SSA def-use链条找到dynamic dim
   auto availableDims = IREE::Util::findDynamicDims(tensor);
   if (availableDims.has_value()) {
     argumentDims.append(availableDims->begin(), availableDims->end());
@@ -34,7 +35,25 @@ static void appendDynamicDims(OpBuilder &b, Location loc,
     return;
   }
 
+  // 对于不支持IREE提供的快速查找dim的情况
+  // 一下是DimOp的解读：
+  /*
+    // Always returns 4, can be constant folded:
+    %c0 = arith.constant 0 : index
+    %x = tensor.dim %A, %c0 : tensor<4x?xf32>
+
+    // Return the dynamic dimension of %A.
+    %c1 = arith.constant 1 : index
+    %y = tensor.dim %A, %c1 : tensor<4x?xf32>
+
+    // Equivalent generic form:
+    %x = "tensor.dim"(%A, %c0) : (tensor<4x?xf32>, index) -> index
+    %y = "tensor.dim"(%A, %c1) : (tensor<4x?xf32>, index) -> index
+  */
   for (auto dim : llvm::enumerate(tensorType.getShape())) {
+    // 遍历dim并获取shape
+    // 判断该shape是否是动态的，不是动态则继续，
+    // 是动态则显示创建一个tensor::DimOp，然后存储如argumentDims做后续处理。
     if (!ShapedType::isDynamic(dim.value()))
       continue;
     argumentDims.push_back(
@@ -49,6 +68,7 @@ findFirstTiedValueOutsideOfRegionOp(IREE::Flow::DispatchRegionOp regionOp,
                                     Value value) {
   // Check if `v` is defined outside of `regionOp`.
   auto isOutside = [&](Value v) {
+    // 判断value的defining op是否不在regionOp的子区间
     if (isa<OpResult>(v))
       return !regionOp->isAncestor(v.getDefiningOp());
     assert(isa<BlockArgument>(v) && "expected bbArg");
@@ -74,6 +94,8 @@ findFirstTiedValueOutsideOfRegionOp(IREE::Flow::DispatchRegionOp regionOp,
 
 } // namespace
 
+/// 这个convert pattern是ConvertDispatchRegionsToWorkgroups这个pass的
+/// 核心算法。
 /// Rewrite the DispatchRegionOp into a DispatchWorkgroupsOp. The
 /// DispatchRegionOp is not isolated from above and may capture any SSA value
 /// that is in scope. The generated DispatchWorkgroupsOp captures all SSA values
@@ -95,6 +117,8 @@ rewriteFlowDispatchRegionToFlowDispatchWorkgroups(
   rewriter.setInsertionPoint(regionOp);
 
   // Compute arguments of the dispatch region.
+  // getUsedValuesDefinedAbove把所有region里使用，
+  // 但是定义在dispatch region外面的values都存储在argumentsSet中。
   llvm::SetVector<Value> argumentsSet;
   mlir::getUsedValuesDefinedAbove(region, argumentsSet);
   // Unranked tensors are not supported.
@@ -103,15 +127,20 @@ rewriteFlowDispatchRegionToFlowDispatchWorkgroups(
   }) && "unranked tensors are not supported");
 
   // Compute dimensions of tensor args.
+  // 这个SmallVector<Value>中存储的都是tensor value。
   SmallVector<Value> argumentDims;
   for (Value tensor : argumentsSet) {
+    // 先前已经用llvm::any_of过滤掉了所有所有非ranked-tensor的可能性了。
+    // 杜绝unranked-tensor就是杜绝维度数不清楚的tensor。
     auto tensorType = llvm::dyn_cast<RankedTensorType>(tensor.getType());
     if (!tensorType)
       continue;
+    // 存储dynamic dims到vector。
     appendDynamicDims(rewriter, loc, argumentDims, tensor);
   }
 
   // Find tied results.
+  // tied arguments 指的是结果值和arguments有关联
   DenseSet<Value> tiedArgumentsSet;
   SmallVector<int64_t> tiedArguments(numResults,
                                      IREE::Util::TiedOpInterface::kUntiedIndex);
@@ -123,6 +152,7 @@ rewriteFlowDispatchRegionToFlowDispatchWorkgroups(
 
   // The logic to find the tied arguments only works for single block regions.
   // For ops with multiple blocks, just ignore tied arguments for now.
+  // todo：后续再研究这一块逻辑
   if (llvm::hasSingleElement(region)) {
     for (const auto &it :
          llvm::enumerate(origTerminators.front()->getOperands())) {
@@ -142,6 +172,7 @@ rewriteFlowDispatchRegionToFlowDispatchWorkgroups(
   }
 
   // Create empty dispatch region.
+  // 需要对于args defined outside做特殊处理。
   SmallVector<Value> arguments(argumentsSet.begin(), argumentsSet.end());
   arguments.append(argumentDims);
   for (unsigned i = 0; i < numResults; ++i) {
@@ -154,12 +185,15 @@ rewriteFlowDispatchRegionToFlowDispatchWorkgroups(
   }
 
   // Create the shell dispatch.workgroup ops.
+  // 创建DispatchWorkgroupsOp，
+  // 需要refer to flow::DispatchWorkgroupsOp来理解这个的作用
   auto workgroupsOp = rewriter.create<IREE::Flow::DispatchWorkgroupsOp>(
       loc, regionOp.getWorkload(), regionOp.getResultTypes(),
       regionOp.getResultDims(), arguments, argumentDims, tiedArguments);
   workgroupsOp->setDialectAttrs(regionOp->getDialectAttrs());
 
   // Populate the workgroup count region.
+  // refer to 说明文档来理解workgroup count 的作用
   if (!regionOp.getWorkgroupCount().empty()) {
     // Move DispatchRegion's workload_count region to DispatchWorkgroupOp's
     rewriter.inlineRegionBefore(regionOp.getWorkgroupCount(),

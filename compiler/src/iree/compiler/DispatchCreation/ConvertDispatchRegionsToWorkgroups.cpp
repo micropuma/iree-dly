@@ -50,11 +50,12 @@ void ConvertDispatchRegionsToWorkgroupsPass::runOnOperation() {
   ///   value.
   TensorDimTrackingRewriter rewriter(funcOp);
 
-// 用一个SmallVector存储funOp里面出现的所有Flow::DispatchRegionOp
+  // 用一个SmallVector存储funOp里面出现的所有Flow::DispatchRegionOp
   SmallVector<IREE::Flow::DispatchRegionOp> regionOps;
   funcOp.walk(
       [&](IREE::Flow::DispatchRegionOp op) { regionOps.push_back(op); });
 
+  // 统计总共有多少regionOps
   numDispatches += regionOps.size();
 
   // Clone additional producers and rewrite to DispatchWorkgroupsOp.
