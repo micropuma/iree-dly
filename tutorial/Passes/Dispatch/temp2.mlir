@@ -1,27 +1,32 @@
-#map = affine_map<(d0, d1) -> (d0, d1)>
-#map1 = affine_map<(d0, d1) -> (d0)>
 module {
-  util.func public @custom_op_producer_fusion(%arg0: tensor<?x?xf32>, %arg1: tensor<?xf32>) -> tensor<?xf32> {
-    %c0 = arith.constant 0 : index
-    %dim = tensor.dim %arg1, %c0 : tensor<?xf32>
-    %0 = flow.dispatch.region -> (tensor<?xf32>{%dim}) {
-      %1 = linalg.generic {indexing_maps = [#map, #map], iterator_types = ["parallel", "parallel"]} ins(%arg0 : tensor<?x?xf32>) outs(%arg0 : tensor<?x?xf32>) {
-      ^bb0(%in: f32, %out: f32):
-        %3 = arith.mulf %in, %in : f32
-        linalg.yield %3 : f32
-      } -> tensor<?x?xf32>
-      %2 = iree_linalg_ext.custom_op{indexing_maps = [#map, #map1], iterator_types = [#iree_linalg_ext.iterator_type<parallel>, #iree_linalg_ext.iterator_type<reduction>]} ins(%1 : tensor<?x?xf32>) outs(%arg1 : tensor<?xf32>) {
-      ^bb0(%arg2: tensor<?x?xf32>, %arg3: tensor<?xf32>):
-        %3 = linalg.generic {indexing_maps = [#map, #map1], iterator_types = ["parallel", "reduction"]} ins(%arg2 : tensor<?x?xf32>) outs(%arg3 : tensor<?xf32>) {
-        ^bb0(%in: f32, %out: f32):
-          %4 = arith.addf %in, %out : f32
-          linalg.yield %4 : f32
-        } -> tensor<?xf32>
-        iree_linalg_ext.yield %3 : tensor<?xf32>
-      } -> tensor<?xf32>
-      flow.return %2 : tensor<?xf32>
+  util.func public @existing_count_region(%arg0: index, %arg1: index) -> tensor<?x?xf32> {
+    %c1 = arith.constant 1 : index
+    %0 = flow.dispatch.workgroups[%arg0, %arg1](%arg0, %arg1, %arg0, %arg1) : (index, index, index, index) -> tensor<?x?xf32>{%arg0, %arg1} =
+        (%arg2: index, %arg3: index, %arg4: index, %arg5: index, %arg6: !flow.dispatch.tensor<writeonly:tensor<?x?xf32>>) {
+      %1 = tensor.empty(%arg4, %arg5) : tensor<?x?xf32>
+      flow.dispatch.tensor.store %1, %arg6, offsets = [0, 0], sizes = [%arg4, %arg5], strides = [1, 1] : tensor<?x?xf32> -> !flow.dispatch.tensor<writeonly:tensor<?x?xf32>>{%arg4, %arg5}
+      flow.return
+    } count(%arg2: index, %arg3: index) -> (index, index, index) {
+      %c1_0 = arith.constant 1 : index
+      flow.return %arg2, %arg3, %c1_0 : index, index, index
     }
-    util.return %0 : tensor<?xf32>
+    util.return %0 : tensor<?x?xf32>
+  }
+  util.func public @simple_test_with_cfg(%arg0: i1) -> tensor<10x20xf32> {
+    %cst = arith.constant dense<1.000000e+00> : tensor<10x20xf32>
+    %0 = flow.dispatch.workgroups(%arg0) : (i1) -> tensor<10x20xf32> =
+        (%arg1: i1, %arg2: !flow.dispatch.tensor<writeonly:tensor<10x20xf32>>) {
+      %cst_0 = arith.constant dense<1.000000e+00> : tensor<10x20xf32>
+      cf.cond_br %arg1, ^bb1, ^bb2
+    ^bb1:  // pred: ^bb0
+      %1 = tensor.empty() : tensor<10x20xf32>
+      flow.dispatch.tensor.store %1, %arg2, offsets = [0, 0], sizes = [10, 20], strides = [1, 1] : tensor<10x20xf32> -> !flow.dispatch.tensor<writeonly:tensor<10x20xf32>>
+      flow.return
+    ^bb2:  // pred: ^bb0
+      flow.dispatch.tensor.store %cst_0, %arg2, offsets = [0, 0], sizes = [10, 20], strides = [1, 1] : tensor<10x20xf32> -> !flow.dispatch.tensor<writeonly:tensor<10x20xf32>>
+      flow.return
+    }
+    util.return %0 : tensor<10x20xf32>
   }
 }
 
