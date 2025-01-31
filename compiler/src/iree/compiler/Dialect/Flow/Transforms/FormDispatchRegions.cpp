@@ -24,18 +24,26 @@
 //===----------------------------------------------------------------------===//
 
 namespace mlir {
-
+// TensorDimTrackingRewriter的实际实现。
 TensorDimTrackingRewriter::TensorDimTrackingRewriter(Operation *op)
     : IRRewriter(op->getContext()) {
   setListener(this);
+  
+  // 十分典型的mlir的op的walk写法：
+  // [&]捕获dimOps
+  // op->walk()将该op传入dimOp，如果是tensor::DimOp，则做insert操作
   op->walk([&](tensor::DimOp dimOp) { dimOps.insert(dimOp.getOperation()); });
 }
+
+// 获取tensor::DimOp集合
 SmallVector<tensor::DimOp> TensorDimTrackingRewriter::getTensorDimOps() {
   SmallVector<tensor::DimOp> result;
   for (Operation *op : dimOps)
     result.push_back(cast<tensor::DimOp>(op));
   return result;
 }
+
+// 添加了rewriter机制提供的listener机制。
 void TensorDimTrackingRewriter::notifyOperationErased(Operation *op) {
   IRRewriter::Listener::notifyOperationErased(op);
   if (isa<tensor::DimOp>(op))
@@ -61,6 +69,7 @@ LogicalResult simplifyDimOps(RewriterBase &rewriter,
     if (!idx.has_value())
       continue;
     // Only DimOps with ranked tensors are supported.
+    // IREE可以处理dynamic tensor，但是不能处理unranked tensor
     auto tensorType =
         llvm::dyn_cast<RankedTensorType>(dimOp.getSource().getType());
     if (!tensorType)
@@ -68,15 +77,25 @@ LogicalResult simplifyDimOps(RewriterBase &rewriter,
 
     if (!tensorType.isDynamicDim(*idx)) {
       // Rewrite static dimension with constant.
+      // RAII 设计模式
       OpBuilder::InsertionGuard g(rewriter);
       rewriter.setInsertionPoint(dimOp);
       int64_t size = tensorType.getShape()[*idx];
+
+      // 静态dimOp全部转变成int
       rewriter.replaceOpWithNewOp<arith::ConstantIndexOp>(dimOp, size);
       continue;
     }
 
     // Try to simplify dynamic dims.
+    // 尝试优化动态维度
+    // 这段代码的功能是优化并替换张量维度操作。
+    // 它首先通过 getOptimizedDynamicResultDims 获取优化后的动态维度。
+    // 然后，它计算出多少个维度是动态的（即未确定的），并根据这些动态维度选择合适的优化值替换掉原操作的维度信息。
     SmallVector<Value> dynamicDims;
+    /// Attemps to create optimized expressions for computing every dynamic
+    /// dimension of 'value'. If successful, 'dynamicDims' contains a value for each
+    /// dynamic dimension of 'value'. Returns failure otherwise.
     if (succeeded(IREE::Flow::getOptimizedDynamicResultDims(
             rewriter, dimOp.getSource(), dynamicDims))) {
       unsigned ctr = 0;

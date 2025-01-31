@@ -244,10 +244,13 @@ reifyDynamicResultDimsImpl(OpBuilder &b, Value value,
   // There is at least one dynamic dimension, continue...
   ShapedType shapedType = llvm::cast<ShapedType>(value.getType());
 
+  // 具备dynamic op，则显式生成tensor.dim
   // Helper function that generates tensor.dim ops.
   auto emitTensorDimOps = [&]() {
+    // 非常标准的对于dynamic dim的处理
     for (int64_t i = 0; i < shapedType.getRank(); ++i) {
       if (shapedType.isDynamicDim(i)) {
+        // 创建tensor.dim operation返回的value，并存储在SmallVectorImpl<Value> &dynamicDims
         Value dim = b.create<tensor::DimOp>(value.getLoc(), value, i);
         dynamicDims.push_back(dim);
       }
@@ -259,21 +262,37 @@ reifyDynamicResultDimsImpl(OpBuilder &b, Value value,
     if (!createTensorDimOps)
       return failure();
 
+    // BlockArgument.getOwner()返回block argument所在的block 
     b.setInsertionPointToStart(bbArg.getOwner());
+
+    // 把所有的dynamic tensor，显式的插入tensor::DimOp计算逻辑
     emitTensorDimOps();
     return success();
   }
 
   // Value is an OpResult.
+  // 这种情况，会考虑operation的result和operand的传递
+  // 从而完成simplify操作
+  /*
+    tensor_1 = op
+    c = op2(tensor_1)
+    对于tensor_1的dim的追溯，要追溯到DefiningOp
+  */
   Operation *op = value.getDefiningOp();
   OpResult opResult = llvm::cast<OpResult>(value);
   b.setInsertionPoint(op);
 
   // Case 3: Value is tied. Reify the dimensions of the tied operand.
+  // 指的是该op是否和其他operation有绑定关系
+  // 如果有，则需要递推地做动态维度推导工作。
   auto tiedOp = dyn_cast<IREE::Util::TiedOpInterface>(op);
   if (tiedOp) {
     Value tiedOperand = tiedOp.getTiedResultOperand(value);
+    // 如果绑定关系的tiedOperand和value有同样的type，则
+    // 可以递归推导，注意：tiedOperand是和value绑定的operand
+    // value是原始的我们的操作op。
     if (tiedOperand && tiedOperand.getType() == value.getType())
+      // 递归推导
       return reifyDynamicResultDimsImpl(b, tiedOperand, dynamicDims,
                                         createTensorDimOps);
   }
