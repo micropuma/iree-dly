@@ -674,6 +674,7 @@ std::optional<ValueRange> findDynamicDims(Value workValue) {
   return std::nullopt;
 }
 
+// 对于shapedValue，寻找dim 定义
 std::optional<ValueRange> findDynamicDims(Value shapedValue, Block *block,
                                           Block::iterator insertionPoint) {
   // Look up the use-def chain: always safe, as any value we reach dominates
@@ -744,6 +745,8 @@ Value findValueSizeInList(unsigned idx, ValueRange values,
   return dims.front();
 }
 
+// flow的convert bitcast的核心功能逻辑。
+// 核心是理解IREE的shape aware机制。
 SmallVector<Value> buildDynamicDimsForValue(Location loc, Value value,
                                             OpBuilder &builder) {
   auto valueType = llvm::dyn_cast<ShapedType>(value.getType());
@@ -783,9 +786,23 @@ SmallVector<Value> buildDynamicDimsForValue(Location loc, Value value,
   // mechanisms. Depending on where this is called from within the parent
   // pipeline these ops may not be desirable, but that's what the
   // ShapeAwareOpInterface is for.
+  /*
+    util.func public @dynamic_tensor_bitcast(%arg0: tensor<?x?xf32>) -> tensor<?x?xi32> {
+    %c1 = arith.constant 1 : index
+    %c0 = arith.constant 0 : index
+    %dim = tensor.dim %arg0, %c0 : tensor<?x?xf32>
+    %dim_0 = tensor.dim %arg0, %c1 : tensor<?x?xf32>
+    %0 = flow.tensor.bitcast %arg0 : tensor<?x?xf32>{%dim, %dim_0} -> tensor<?x?xi32>{%dim, %dim_0}
+    util.return %0 : tensor<?x?xi32>
+  }
+  显示插入tensor.dim维度计算信息。 
+  */
   SmallVector<Value> dynamicDims;
   for (unsigned i = 0; i < valueType.getRank(); ++i) {
     if (valueType.isDynamicDim(i)) {
+      // 如果dim已知，则返回constant，而不是tensor::DimOp，这就是create or fold
+      // 这一行变成：%c0 = arith.constant 0 : index
+      //            %dim_0 = tensor.dim %arg0, %c1 : tensor<?x?xf32>
       dynamicDims.push_back(builder.createOrFold<tensor::DimOp>(loc, value, i));
     }
   }

@@ -179,6 +179,12 @@ convertExtractSliceOpToFlowSliceOp(RewriterBase &rewriter,
   SmallVector<OpFoldResult> sizes = sliceOp.getMixedSizes();
   SmallVector<OpFoldResult> strides = sliceOp.getMixedStrides();
   ArrayRef<int64_t> srcShape = sliceOp.getSourceType().getShape();
+
+  // 这个辅助函数，检查offset，sizes和strides是否满足flow化的要求。
+  // 1. 不可以降维
+  // 2. 步长必须为1
+  // 3. 所有 offsets、sizes、strides 不能从 Tensor 动态提取（避免 host 计算）。
+  // 4. 完整切片允许动态 size，而非完整切片必须是 size=1。
   if (!isOffsetSizeAndStrideMappableToFlow(offsets, sizes, strides, srcShape)) {
     return failure();
   }

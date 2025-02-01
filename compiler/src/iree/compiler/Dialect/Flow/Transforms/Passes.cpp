@@ -109,6 +109,8 @@ static void addCleanupPatterns(OpPassManager &passManager) {
 //===----------------------------------------------------------------------===//
 
 // 学习Flow dialect的核心pipeline
+// Flow dialect的核心dispatch功能已经做好了
+// 这个 transform主要是一些善后工作。
 void buildFlowTransformPassPipeline(OpPassManager &passManager,
                                     const TransformOptions &transformOptions) {
   // Start of Flow pipeline, verify input legality.

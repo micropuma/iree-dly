@@ -94,14 +94,42 @@ struct ConvertTensorExtractPattern
   }
 };
 
+/*
+  util.func public @static_tensor_bitcast(%arg0: tensor<4x4xf32>) -> tensor<4x4xi32> {
+  // CHECK-DAG: %[[RESULT:.*]] = flow.tensor.bitcast %arg0 : tensor<4x4xf32> -> tensor<4x4xi32>
+  // CHECK: util.return %[[RESULT]]
+  %0 = tensor.bitcast %arg0 : tensor<4x4xf32> to tensor<4x4xi32>
+  util.return %0 : tensor<4x4xi32>
+}
+
+// -----
+
+util.func public @dynamic_tensor_bitcast(%arg0: tensor<?x?xf32>) -> tensor<?x?xi32> {
+  // CHECK: %[[DIM0:.+]] = tensor.dim %arg0, %c0 : tensor<?x?xf32>
+  // CHECK: %[[DIM1:.+]] = tensor.dim %arg0, %c1 : tensor<?x?xf32>
+  // CHECK: %[[RESULT:.+]] = flow.tensor.bitcast %arg0 : tensor<?x?xf32>{%[[DIM0]], %[[DIM1]]} -> tensor<?x?xi32>{%[[DIM0]], %[[DIM1]]}
+  // CHECK: util.return %[[RESULT]]
+  %0 = tensor.bitcast %arg0 : tensor<?x?xf32> to tensor<?x?xi32>
+  util.return %0 : tensor<?x?xi32>
+}
+*/
+/// 从测试case来看，这个pattern是比较直接的：
+/// 1. 对于static dim，直接对应转化即可。
+/// 2. 对于dynamic dim，需要利用tensor.dim op获取dim维度，方便后续的维度推导。
 struct ConvertTensorBitcastPattern
     : public OpRewritePattern<tensor::BitcastOp> {
   using OpRewritePattern<tensor::BitcastOp>::OpRewritePattern;
   LogicalResult matchAndRewrite(tensor::BitcastOp op,
                                 PatternRewriter &rewriter) const override {
+    // 只转换不在DispatchWorkgourpsOp的region中的tensor
+    // dispatch内部的tensor，保留tensor dialect即可。
+    // flow.dispatch.tensor后续会变成stream，而kernel上的不用变成string。
     if (op->getParentOfType<IREE::Flow::DispatchWorkgroupsOp>()) {
       return failure();
     }
+
+    // 重点研究这个buildDynamicDimsForValue
+    // 如果value是fully static dim，则empty
     auto dynamicDims = IREE::Util::buildDynamicDimsForValue(
         op.getLoc(), op.getOperand(), rewriter);
     rewriter.replaceOpWithNewOp<IREE::Flow::TensorBitCastOp>(

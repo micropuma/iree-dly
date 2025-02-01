@@ -338,6 +338,7 @@ void buildStreamOptimizationPassPipeline(
 // --iree-stream-transformation-pipeline
 //===----------------------------------------------------------------------===//
 
+// 核心代码，convert flow to stream
 void buildStreamTransformPassPipeline(
     OpPassManager &passManager, const TransformOptions &transformOptions) {
   //----------------------------------------------------------------------------

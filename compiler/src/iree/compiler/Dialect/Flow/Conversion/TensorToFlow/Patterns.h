@@ -13,6 +13,7 @@
 namespace mlir::iree_compiler::IREE::Flow {
 
 // Adds patterns for Tensor->Flow, for running before dispatch region formation.
+// 在region formation之前，就已经完成Tensor -> Flow这个converstion pattern了。
 void populateTensorToFlowConversionPatterns(MLIRContext *context,
                                             RewritePatternSet &patterns);
 

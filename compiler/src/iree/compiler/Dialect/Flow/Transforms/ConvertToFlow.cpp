@@ -26,8 +26,11 @@ struct ConvertToFlowPass
   void runOnOperation() override {
     MLIRContext *context = &getContext();
     RewritePatternSet convertToFlowPatterns(context);
+
+    // Convert to Flow的一个核心pattern：convertToFlowPatterns
     IREE::Flow::populateTensorToFlowConversionPatterns(context,
                                                        convertToFlowPatterns);
+    // IREE 期望将动态维度变成tensor::dimOp的显示表达。
     memref::populateResolveRankedShapedTypeResultDimsPatterns(
         convertToFlowPatterns);
     if (failed(applyPatternsAndFoldGreedily(
