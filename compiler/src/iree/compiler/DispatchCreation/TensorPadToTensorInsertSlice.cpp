@@ -42,14 +42,23 @@ struct TensorPadOpConversion : public OpRewritePattern<tensor::PadOp> {
 
   LogicalResult matchAndRewrite(tensor::PadOp padTensorOp,
                                 PatternRewriter &rewriter) const override {
+    /*
+      %pad_value = ... : f32
+      %0 = tensor.pad %arg0 nofold low[0, 0] high[0, 0] {
+      ^bb0(%arg1: index, %arg2: index):
+        tensor.yield %pad_value : f32
+      } : tensor<2x3xf32> to tensor<2x3xf32>
+    */
     // Check that the region is just a yield operation which is returning a
     // scalar that is not one of the arguments of the linalg operation.
     Region &region = padTensorOp.getRegion();
     Block &block = region.front();
+    // 确保pad操作的region只能有一个。
     if (!llvm::hasSingleElement(block))
       return failure();
     auto yieldOp = cast<tensor::YieldOp>(block.getTerminator());
     Value yieldVal = yieldOp.getValue();
+    // 不能是block的传参用来填充。
     if (llvm::any_of(block.getArguments(),
                      [&](Value v) { return v == yieldVal; })) {
       return failure();

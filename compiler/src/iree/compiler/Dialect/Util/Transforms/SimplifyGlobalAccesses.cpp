@@ -254,6 +254,7 @@ rearrangeBlockGlobalAccesses(Block &block,
 
 namespace {
 
+/// hoists loads and sinks stores to variables to decrease data dependency regions.
 class SimplifyGlobalAccessesPass
     : public SimplifyGlobalAccessesBase<SimplifyGlobalAccessesPass> {
 public:
