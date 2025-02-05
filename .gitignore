@@ -103,3 +103,6 @@ artifacts/
 
 # cuda temp code
 *.idx
+*-arch*
+*-base*
+
