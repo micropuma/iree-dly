@@ -333,6 +333,7 @@ void buildIREEVMTransformPassPipeline(
     break;
   }
 
+  // 尝试理解HAL和VM的流程。
   IREE::HAL::PipelinePhase halCompileFrom =
       getHALPipelinePhase(compileFrom, IREE::HAL::PipelinePhase::Start);
   IREE::HAL::PipelinePhase halCompileTo =

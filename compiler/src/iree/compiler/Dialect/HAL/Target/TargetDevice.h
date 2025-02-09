@@ -25,6 +25,7 @@ public:
   // Returns the default device this backend targets. This may involve setting
   // defaults from flags and other environmental sources, and it may be
   // cross-targeting in a way that is not compatible with the host.
+  // 表示必须override这个函数。
   virtual IREE::HAL::DeviceTargetAttr
   getDefaultDeviceTarget(MLIRContext *context,
                          const TargetRegistry &targetRegistry) const = 0;

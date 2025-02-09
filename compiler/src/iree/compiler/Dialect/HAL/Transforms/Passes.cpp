@@ -148,6 +148,7 @@ using FunctionLikeNest =
 // Utilities
 //===----------------------------------------------------------------------===//
 
+// 这部分codes十分有借鉴意义，可以用于构建pass pipeline的cleanup流程。
 static void addCleanupPatterns(OpPassManager &passManager) {
 
   FunctionLikeNest(passManager)
@@ -196,6 +197,7 @@ void buildHALDeviceAssignmentPassPipeline(
   // derives/specifies the target devices and annotates the module with that
   // information. This allows subsequent passes to lookup which devices they are
   // targeting.
+  // 我的case中，是通过assignlegacy来添加backend信息
   if (!assignmentOptions.legacyTargetBackends.empty()) {
     // Today we just assign devices from parameters but we should instead be
     // performing analysis at the flow level and then doing magic device
@@ -212,10 +214,29 @@ void buildHALDeviceAssignmentPassPipeline(
     AssignTargetDevicesPassOptions options;
     options.targetDevices.assign(assignmentOptions.targetDevices.begin(),
                                  assignmentOptions.targetDevices.end());
+    // Assigns target HAL devices to the module based on the given list of target
+    // specifications.
     passManager.addPass(IREE::HAL::createAssignTargetDevicesPass(options));
   }
 
   // Create globals for each device (if needed).
+  // HAL todo：细致debug这个流程
+  /*
+    createMaterializeInterfacesPass 的核心作用是将流（Stream）层级的可执行程序和调度指令转换为硬件抽象层（HAL）的具体实现，
+    为多设备目标生成接口统一的变体，并抽象化资源访问方式。
+    1. 多设备目标变体生成：允许同一可执行程序在不同硬件后端上生成适配的代码，实现跨平台兼容性。
+    2. 统一导出函数（export）、调度函数（dispatch）和源函数（source func）的调用接口，移除显式参数。
+    3. 绑定布局与管线配置:与图形API（如Vulkan）的绑定模型对齐，确保资源在GPU上的正确分配。
+        layout(#hal.pipeline.layout<push_constants=0, sets=[<0, bindings=[<0, storage_buffer, ReadOnly>, ...]>]>)
+    4. 调度指令的绑定属性增强
+    5. 资源访问抽象化：hal.interface.binding.subspan 获取缓冲区的子视图（Subspan）
+    设计动机与优势
+      硬件抽象：通过变体机制支持多后端，无需修改计算逻辑即可适配不同设备。
+      资源解耦：函数逻辑与资源传递解耦，提升代码复用性。
+      与图形API对齐：绑定模型贴近Vulkan等API，便于直接映射到底层实现。
+      简化调度：统一接口使得调度指令更简洁，绑定关系更明确。
+      此Pass是连接高层流计算与底层硬件实现的关键桥梁，确保了跨平台部署的一致性和高效性。
+  */
   passManager.addPass(IREE::HAL::createMaterializeTargetDevicesPass(
       {assignmentOptions.defaultDevice}));
 
@@ -242,6 +263,7 @@ void buildHALConfigurationPassPipeline(OpPassManager &passManager,
 
   // Perform cleanup upon entry so that our IR is in a good state for assignment
   // and initial interface analysis (we rely on CSE and such having been run).
+  // HAL todo：debug这些clean up代码的写法，是比较常见的写法。
   addCleanupPatterns(passManager);
 
   // Verify devices are valid.
@@ -296,7 +318,7 @@ void buildHALConfigurationPassPipeline(OpPassManager &passManager,
 //===----------------------------------------------------------------------===//
 // --iree-hal-transformation-pipeline
 //===----------------------------------------------------------------------===//
-
+// 针对HAL机制的核心pass。
 void buildHALTransformPassPipeline(OpPassManager &passManager,
                                    const TargetRegistry &targetRegistry,
                                    const TargetOptions &targetOptions,
@@ -317,6 +339,8 @@ void buildHALTransformPassPipeline(OpPassManager &passManager,
     assignmentOptions.legacyTargetBackends = targetOptions.legacyTargetBackends;
     assignmentOptions.targetDevices = targetOptions.targetDevices;
     assignmentOptions.defaultDevice = targetOptions.defaultDevice;
+    // 在最外层的module上添加device targets属性，可以指定多个target devices。
+    // 完成函数与数据阐述解耦，使得代码符合Vulkan规范
     buildHALDeviceAssignmentPassPipeline(passManager, targetRegistry,
                                          assignmentOptions);
     buildHALConfigurationPassPipeline(passManager, targetRegistry,
@@ -408,6 +432,12 @@ void buildHALTransformPassPipeline(OpPassManager &passManager,
     hooks.beforePhase(PipelinePhase::ExecutableTargets, passManager);
   }
 
+  // HAL todo，这是核心pass，完成debug，仔细理解llvm gpu的流程。
+  /*
+    Runs a nested pipeline on each executable to translate its variants from
+    their generic MLIR dialects (such as `linalg`) to their target-specific
+    dialects (`llvm`, `spirv`, etc).
+  */
   if (compileFrom < PipelinePhase::ExecutableTargets) {
     passManager.addNestedPass<IREE::HAL::ExecutableOp>(
         IREE::HAL::createTranslateExecutablesPass({targetRegistry}));

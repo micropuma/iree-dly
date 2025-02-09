@@ -462,6 +462,7 @@ public:
     buildLLVMGPUCodegenConfigurationPassPipeline(passManager);
   }
 
+  // cuda target的核心pipeline
   void buildTranslationPassPipeline(IREE::HAL::ExecutableTargetAttr targetAttr,
                                     OpPassManager &passManager) override {
     buildLLVMGPUCodegenPassPipeline(passManager, false);

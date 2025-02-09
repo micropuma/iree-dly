@@ -1182,6 +1182,8 @@ void buildLLVMGPUCodegenPassPipeline(OpPassManager &variantPassManager,
                                      bool useROCM) {
   {
     OpPassManager &modulePassManager = variantPassManager.nest<ModuleOp>();
+
+    // 学习Transform dialect的写法，可以自定义passes？
     modulePassManager.addPass(createLowerExecutableUsingTransformDialectPass());
     FunctionLikeNest(modulePassManager)
         .addPass(createLLVMGPULowerExecutableTargetPass);
@@ -1195,6 +1197,7 @@ void buildLLVMGPUCodegenPassPipeline(OpPassManager &variantPassManager,
   //   - All Linalg/Loops/GPU/Affine/Standard ops are converted away.
   //   - The module contains the final llvm.module ready to be serialized.
   //===--------------------------------------------------------------------===//
+  // 从mlir系统接入llvm系统的关键pass
   addLowerToLLVMGPUPasses(variantPassManager.nest<ModuleOp>(), useROCM);
 
   LLVM_DEBUG({

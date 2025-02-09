@@ -63,6 +63,8 @@ struct TranslateTargetExecutableVariantsPass
     }
 
     OpPassManager passManager(variantOp.getOperationName());
+
+    // 这里做dipatch，dispatch成特定backend实现的translate pass
     targetBackend->buildTranslationPassPipeline(variantOp.getTargetAttr(),
                                                 passManager);
     if (failed(runPipeline(passManager, variantOp))) {
@@ -85,6 +87,8 @@ struct TranslateExecutablesPass
       TranslateExecutablesPass>::TranslateExecutablesPassBase;
 
   void getDependentDialects(DialectRegistry &registry) const override {
+    // 只用注册HAL和bufferization两个dialect
+    // 以及targetRegistry中的所有target backend的dependent dialects
     registry.insert<IREE::HAL::HALDialect>();
     registry.insert<bufferization::BufferizationDialect>();
     auto targetBackends = targetRegistry->getTargetBackends(
@@ -99,6 +103,9 @@ struct TranslateExecutablesPass
     OpPassManager passManager(executableOp.getOperationName());
     for (const auto &targetName : gatherExecutableTargetNames(executableOp)) {
       passManager.addNestedPass<IREE::HAL::ExecutableVariantOp>(
+        // Translates an executable variant for a specific target from its generic
+        // MLIR dialects (such as `linalg`) to the target-specific dialects (`llvm`,
+        // spirv`, etc).
           IREE::HAL::createTranslateTargetExecutableVariantsPass(
               {targetRegistry, targetName}));
     }

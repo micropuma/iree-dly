@@ -24,6 +24,7 @@ namespace mlir::iree_compiler::IREE::HAL {
 // Pipelines
 //===----------------------------------------------------------------------===//
 
+// 这个pipeline phase是到HAL的pipeline流程
 enum class PipelinePhase {
   // Pipeline entry point.
   Start,
@@ -38,6 +39,16 @@ enum class PipelinePhase {
   End,
 };
 
+// 使用方法：
+/*
+  PipelineHooks hooks;
+  hooks.beforePhase = [](PipelinePhase phase, OpPassManager &pm) {
+    std::cout << "Starting phase: " << phase << std::endl;
+  };
+  hooks.afterPhase = [](PipelinePhase phase, OpPassManager &pm) {
+    std::cout << "Completed phase: " << phase << std::endl;
+  };
+*/
 // Hooks for injecting behavior into the HAL pipeline.
 struct PipelineHooks {
   // Called immediately before a compilation phase.
@@ -86,12 +97,14 @@ void buildHALConfigurationPassPipeline(OpPassManager &passManager,
                                        const TargetOptions &targetOptions,
                                        PipelineHooks hooks = {});
 
+// 这是HAL的核心pipeline，包含了所有的pass
 // Adds a set of passes to the given pass manager that run the required HAL
 // transforms in the canonical order.
 //
 // Most translation code should prefer to use this instead of manually adding
 // the passes themselves to ensure that expected pass ordering is observed.
 //
+// 这个usage很好地展示了iree项目的前后逻辑
 // The expected usage is:
 //   <run conversion to flow/sequencer/etc>
 //   buildHALTransformPassPipeline & run
