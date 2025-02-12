@@ -588,6 +588,7 @@ void addGPUMatmulSimtPassPipeline(OpPassManager &funcPassManager,
 // Matmul Tensor Core
 //===---------------------------------------------------------------------===//
 
+// 尝试理解llvmgpu如何target到tensor core硬件上。
 void addGPUMatmulTensorCorePassPipeline(OpPassManager &funcPassManager,
                                         const GPUPipelineOptions &options,
                                         unsigned pipelineDepth) {
@@ -1178,6 +1179,7 @@ void buildLLVMGPUCodegenConfigurationPassPipeline(
       variantPassManager.nest<ModuleOp>());
 }
 
+// cuda后端的代码生成核心pipeline
 void buildLLVMGPUCodegenPassPipeline(OpPassManager &variantPassManager,
                                      bool useROCM) {
   {
@@ -1185,6 +1187,9 @@ void buildLLVMGPUCodegenPassPipeline(OpPassManager &variantPassManager,
 
     // 学习Transform dialect的写法，可以自定义passes？
     modulePassManager.addPass(createLowerExecutableUsingTransformDialectPass());
+
+    // 这个createLLVMGPULowerExecutableTargetPass是关键pass.
+    // Perform lowering of executable target using one of the IREE::HAL::DispatchLoweringPassPipeline
     FunctionLikeNest(modulePassManager)
         .addPass(createLLVMGPULowerExecutableTargetPass);
   }

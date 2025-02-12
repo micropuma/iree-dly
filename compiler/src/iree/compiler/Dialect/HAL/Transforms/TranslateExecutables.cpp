@@ -65,6 +65,7 @@ struct TranslateTargetExecutableVariantsPass
     OpPassManager passManager(variantOp.getOperationName());
 
     // 这里做dipatch，dispatch成特定backend实现的translate pass
+    // 以cuda为例，这里就会是cuda生成的pass
     targetBackend->buildTranslationPassPipeline(variantOp.getTargetAttr(),
                                                 passManager);
     if (failed(runPipeline(passManager, variantOp))) {
