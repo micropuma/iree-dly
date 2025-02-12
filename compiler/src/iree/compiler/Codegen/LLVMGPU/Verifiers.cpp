@@ -10,22 +10,39 @@
 #include "iree/compiler/Codegen/Utils/GPUUtils.h"
 #include "iree/compiler/Codegen/Utils/Utils.h"
 
+/*
+  主要用于验证在 GPU 上针对矩阵乘法（matmul）和批量矩阵乘法（batchmatmul）的编译配置是否合理，
+  特别是针对 CUDA 和 Tensor Core 管线的配置。
+  1. workloadsize要能整除workgroup
+  2. workgroup要能整除warp
+  3. 一个warp的shape要能整除指令
+*/
+
 namespace mlir::iree_compiler {
 
+// 十分有趣的code部分，重点是对于iree finetune部分的配置的合理性verify：
+// #compilation0 = #iree_codegen.compilation_info<
+// lowering_config = #iree_codegen.lowering_config<tile_sizes = [[32, 32, 16]]>,
+// translation_info = #iree_codegen.translation_info<pipeline = LLVMGPUMatmulTensorCore workgroup_size = [64, 2, 1]
+// , { pipeline_depth = 3, store_stage = 1}>>
 using CodeGenPipeline = IREE::Codegen::DispatchLoweringPassPipeline;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Constants used in the matmul lowering verifiers.
+// verify的层级，有workgroup层级，thread层级，warp层级，指令层级。
+// 目前target workgroup层级
 constexpr unsigned kWorkgroupTileLevel = 0;
 
 // Use the constexpr to convey the meaning of the indices.
 // Dimenstions identifiers for: workgroup size (x, y, z), and thread (x, y, z).
+// 对于 workgroup 或线程维度，分别为 x, y, z 维度：
 constexpr int kDimX = 0;
 constexpr int kDimY = 1;
 constexpr int kDimZ = 2;
 
 // Dimensions identifiers for: matmul problem shapes (m, n, k), thread block
 // shape (m, n, k), warp shape, and instruction shape (m, n, k).
+// 对于矩阵乘法的问题尺寸和 tile 尺寸，分别代表矩阵的行 (M)、列 (N) 以及累加的内积维度 (K)：
 constexpr int kM = 0;
 constexpr int kN = 1;
 constexpr int kK = 2;
@@ -33,6 +50,8 @@ constexpr int kK = 2;
 
 /// Returns the shape of the math instruction for the given pipeline and input
 /// element type.
+/// 例如，对于 Tensor Core 管线，f16 和 bf16 类型对应的指令形状为 {16, 16, 16}，而 f32 类型对应 {16, 16, 8}。
+/// Tensor Core的计算能力是硬件定死的，因此我们需要根据输入的数据类型来选择合适的指令形状。
 static LogicalResult
 getInstructionShape(Operation *op, CodeGenPipeline pipeline,
                     Type inputElementType,
@@ -42,6 +61,8 @@ getInstructionShape(Operation *op, CodeGenPipeline pipeline,
     // SIMT Pipeline / CUDA Cores
     instructionShape = {1, 1, 1};
     break;
+
+  // 我们的pipeline是LLVMGPUMatmulTensorCore
   case CodeGenPipeline::LLVMGPUMatmulTensorCore:
     // Tensor Core Pipeline / WMMA API
     if (inputElementType.isF16() || inputElementType.isBF16()) {
@@ -74,6 +95,13 @@ getInstructionShape(Operation *op, CodeGenPipeline pipeline,
 
 /// Verifies launch configuration for matmul and batchmatmul on a GPU for CUDA
 /// and Tensor Core pipelines.
+/*
+函数 verifyGPUMatmulPipeline 用于验证 GPU 上针对 matmul 或 batch matmul 操作的编译配置是否正确。主要验证内容包括：
+ 1. 工作组（workgroup）大小是否设置合理；
+ 2. 软件流水线（software pipeline）参数是否正确配置（例如 pipeline depth 和 store stage）；
+ 3. 矩阵乘法的维度与 tile（分块）尺寸是否匹配；
+ 4. 对于 Tensor Core 管线，还要验证线程块内 warp 数量以及指令形状和 warp tile 是否能够整除。
+*/
 LogicalResult
 verifyGPUMatmulPipeline(Operation *op,
                         IREE::Codegen::LoweringConfigAttr loweringConfig,
@@ -81,6 +109,10 @@ verifyGPUMatmulPipeline(Operation *op,
                         ArrayRef<int64_t> workgroupSize) {
   // This verifier only applies to matmul.
   CodeGenPipeline pipeline = translationInfo.getDispatchLoweringPassPipeline();
+
+  // CUDA Core模式
+  // Tensor Core模式
+  // Tensor Core + MMA.SYNC模式
   if (pipeline != CodeGenPipeline::LLVMGPUMatmulSimt &&
       pipeline != CodeGenPipeline::LLVMGPUMatmulTensorCore &&
       pipeline != CodeGenPipeline::LLVMGPUMatmulTensorCoreMmaSync) {
@@ -92,6 +124,7 @@ verifyGPUMatmulPipeline(Operation *op,
   }
 
   // Early exit if the workgroup size is not set.
+  // 需要设定好workgroup size
   if (workgroupSize.empty()) {
     return op->emitOpError("expected workgroup size for GPU pipelines");
   }
@@ -105,6 +138,7 @@ verifyGPUMatmulPipeline(Operation *op,
         "invalid matmul configuration without pipelining config");
   }
 
+  // iree默认写入workgroup的阶段是pipeline1。
   if (*maybeStage != 1) {
     return op->emitError(
         "store to workgroup memory currently expected to happen in stage 1 of "
@@ -115,6 +149,7 @@ verifyGPUMatmulPipeline(Operation *op,
   StringRef pipelineName = stringifyEnum(pipeline);
 
   // Get Operand/Result types.
+  // 矩阵乘运算的左右type必须保持一致，目前不支持混合精度
   mlir::Type lhsType = op->getOperand(0).getType();
   mlir::Type rhsType = op->getOperand(1).getType();
   assert(cast<ShapedType>(lhsType).getElementType() ==
@@ -123,10 +158,12 @@ verifyGPUMatmulPipeline(Operation *op,
          "supported yet in IREE Codegen.");
 
   // Get lhs and rhs shapes.
+  // 十分经典的shape强转换代码。
   ArrayRef<int64_t> lhsShape = llvm::cast<ShapedType>(lhsType).getShape();
   ArrayRef<int64_t> rhsShape = llvm::cast<ShapedType>(rhsType).getShape();
 
   // Tile shapes in number of elements.
+  // 获取tile配置，默认为thread block形状。
   SmallVector<int64_t> tileShape =
       loweringConfig.getTileSizeVals(kWorkgroupTileLevel);
   SmallVector<int64_t> threadBlockShape{tileShape};
@@ -135,6 +172,8 @@ verifyGPUMatmulPipeline(Operation *op,
     // Inspect the batch tile dimensions separately for batch. The batch tile
     // dim should be strictly greater than 1 for parallelizable loops and 0
     // for non-parallelizable.
+    // 对于批量矩阵乘法，我们需要单独检查批量维度。对于可并行化的循环，批量维度应该严格大于 1，
+    // 对于不可并行化的循环，批量维度应该为 0。
     if (cast<PartitionableLoopsInterface>(op).getPartitionableLoops(
             kNumMaxParallelDims)[0] == 0) {
       if (tileShape[0] > 1) {
@@ -144,6 +183,7 @@ verifyGPUMatmulPipeline(Operation *op,
                << "compilation pipeline " << pipelineName;
       }
     } else {
+      // 如果不可并行化，则批量维度应该为 0。
       if (tileShape[0] != 0) {
         return op->emitError("Received batch tile dimension of ")
                << tileShape[0]
@@ -155,6 +195,8 @@ verifyGPUMatmulPipeline(Operation *op,
     // Remove the batch dimension from the threadBlockShape, lhsShape, and
     // rhsShape.
     threadBlockShape = {tileShape[1], tileShape[2], tileShape[3]};
+
+    // 选择丢弃第一个维度，即批量维度。
     lhsShape = lhsShape.drop_front();
     rhsShape = rhsShape.drop_front();
   }
@@ -164,6 +206,8 @@ verifyGPUMatmulPipeline(Operation *op,
   //
 
   // Verify the total number of threads in a thread block.
+  // 计算总线程数，不能超过1024.
+  // 一个thread block的threads数是1024.
   int totalNumThreads = workgroupSize[0] * workgroupSize[1] * workgroupSize[2];
 
   if (totalNumThreads > 1024) {
@@ -174,6 +218,7 @@ verifyGPUMatmulPipeline(Operation *op,
   }
 
   // Verify the number of threads in z-dim is 1.
+  // 验证z维度的线程数是1。tensorcore的z维度是1，因为专门用来处理matmul操作。
   if (workgroupSize[kDimZ] != 1) {
     return op->emitError("Expected workgroup size in z-dim = 1, but got ")
            << workgroupSize[kDimZ] << " with compilation pipeline "
@@ -190,6 +235,7 @@ verifyGPUMatmulPipeline(Operation *op,
 
   // Verify that x-dim has multiple of kWarpSize threads or has integer units of
   // warps in x-dim.
+  // 验证 x 维度的线程数必须是 warp 大小的倍数
   if (workgroupSize[kDimX] % kWarpSize != 0) {
     return op->emitError("Number of threads in x-dim ")
            << workgroupSize[kDimX] << " is not a multiple of warp size ("
@@ -199,20 +245,30 @@ verifyGPUMatmulPipeline(Operation *op,
   }
 
   // Number of warps in x, y, and z dim.
+  // 计算一个workgroup的warp数目
   SmallVector<int64_t> numWarps{workgroupSize[kDimX] / kWarpSize,
                                 workgroupSize[kDimY], workgroupSize[kDimZ]};
 
   // Matrix-multiply problem shape in number of elements in M, N, and K dim.
+  // 获取矩阵最本元的MNK参数。
   SmallVector<int64_t> matmulShape{lhsShape[0], rhsShape[1], lhsShape[1]};
 
   // Warp tile shape in number of elements in M, N, and K dim.
   // Note that num warp in (x, y, z) dim are mapped to problem (M, N, K) dim as:
   // DimY -> ProblemDimM, DimX -> ProblemDimN, DimZ -> ProblemDimK.
+  /*
+    将线程块（thread block）形状均匀划分给各个 warp。
+    注意：注释中说明了 warp 在 (x, y, z) 维度的分布映射到矩阵问题的 (M, N, K) 上，其中：
+      y 维度 warp 对应问题的 M；
+      x 维度 warp 对应问题的 N；
+      z 维度 warp 对应问题的 K；
+  */
   SmallVector<int64_t> warpShape{threadBlockShape[kM] / numWarps[kDimY],
                                  threadBlockShape[kN] / numWarps[kDimX],
                                  threadBlockShape[kK] / numWarps[kDimZ]};
 
   // Instruction shape in number of elements in M, N, and K dim.
+  // 获取tensor core指令形状
   SmallVector<int64_t> instructionShape;
   if (failed(getInstructionShape(
           op, pipeline, llvm::cast<ShapedType>(lhsType).getElementType(),
@@ -222,6 +278,7 @@ verifyGPUMatmulPipeline(Operation *op,
 
   // Verify that matmul problem shape can be tiled with the thread block shape.
   // TODO: This check should be relaxed as we allow unaligned matmul shapes.
+  // 要求矩阵问题的每个维度（M、N、K）能够被线程块相应的维度整除。
   if (matmulShape[kM] % threadBlockShape[kM] != 0 ||
       matmulShape[kN] % threadBlockShape[kN] != 0 ||
       matmulShape[kK] % threadBlockShape[kK] != 0) {
@@ -232,6 +289,8 @@ verifyGPUMatmulPipeline(Operation *op,
 
   // Verify that if warp shape can be tiled using warp-level Tensor core
   // instruction shape.
+  // 确保每个 warp tile（即 warpShape）在 M、N、K 维度上均可以被对应的 Tensor Core 指令形状整除。
+  // 若不满足，则说明硬件的计算单元（Tensor Core）无法完美地覆盖 warp tile
   if (warpShape[kM] % instructionShape[kM] != 0 ||
       warpShape[kN] % instructionShape[kN] != 0 ||
       warpShape[kK] % instructionShape[kK] != 0) {

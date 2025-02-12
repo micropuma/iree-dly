@@ -211,6 +211,8 @@ public:
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<affine::AffineDialect, gpu::GPUDialect>();
   }
+
+  // debug1：tensor core
   void runOnOperation() override {
     MLIRContext *context = &getContext();
     auto funcOp = getOperation();
@@ -310,6 +312,17 @@ public:
 };
 } // namespace
 
+/*
+LLVMGPUTileAndDistribute Pass的工作流程：
+  * 提升C到共享内存：减少全局内存访问。
+  * K维度分块：分解计算为小块，适配寄存器和共享内存。
+  * 提升A/B到共享内存（可选）：进一步减少全局内存依赖。
+  * Warp级别分块：映射计算到GPU线程层次，最大化并行度。
+性能优化核心：
+  * 数据局部性：通过共享内存缓存减少全局内存访问。
+  * 并行度：Workgroup和Warp两级并行，充分利用GPU线程资源。
+  * 硬件适配：分块尺寸匹配Tensor Core指令要求（如16x16x16）。
+*/
 std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
 createLLVMGPUTileAndDistributePass(bool distributeToWarp) {
   return std::make_unique<LLVMGPUTileAndDistributePass>(distributeToWarp);

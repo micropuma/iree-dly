@@ -17,6 +17,7 @@ namespace mlir::iree_compiler {
 #define GEN_PASS_DEF_GPUMULTIBUFFERINGPASS
 #include "iree/compiler/Codegen/Common/GPU/Passes.h.inc"
 
+// todo hal: 一个比较重要，且简单的pass
 namespace {
 struct GPUMultiBufferingPass final
     : impl::GPUMultiBufferingPassBase<GPUMultiBufferingPass> {

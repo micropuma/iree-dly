@@ -589,12 +589,14 @@ void addGPUMatmulSimtPassPipeline(OpPassManager &funcPassManager,
 //===---------------------------------------------------------------------===//
 
 // 尝试理解llvmgpu如何target到tensor core硬件上。
+// todo hal: 重点debug理解如何dispatch到tensor core上。
 void addGPUMatmulTensorCorePassPipeline(OpPassManager &funcPassManager,
                                         const GPUPipelineOptions &options,
                                         unsigned pipelineDepth) {
   tileAndBufferize(funcPassManager);
 
   // Distribute linalg onto warps within the workgroup.
+  // step1：将linalg op分配到warp中。需要完成tiling 分块技术。
   funcPassManager.addPass(
       createLLVMGPUTileAndDistributePass(/*distributeToWarp=*/true));
   funcPassManager.addPass(createRemoveSingleIterationLoopPass());
