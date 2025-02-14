@@ -18,6 +18,9 @@ namespace mlir::iree_compiler {
 #include "iree/compiler/Codegen/Common/GPU/Passes.h.inc"
 
 // todo hal: 一个比较重要，且简单的pass
+// 这个Pass是完成软件流水线的重要一环。
+// 多缓冲模式中应使用的缓冲数量取决于流水线深度（也称流水线阶段数量）
+// 其核心思想是通过引入多缓冲，使得循环迭代尽可能并行执行，从而为最终实现软件流水线创造条件。
 namespace {
 struct GPUMultiBufferingPass final
     : impl::GPUMultiBufferingPassBase<GPUMultiBufferingPass> {
