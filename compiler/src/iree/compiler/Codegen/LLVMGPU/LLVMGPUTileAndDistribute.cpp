@@ -287,6 +287,7 @@ public:
       funcOp.dump();
     });
 
+    // 理解的一个关键点，根据warp：32个线程，做进一步分块操作。
     if (distributeToWarp) {
       // Apply last level of tiling and distribute to warps.
       if (failed(tileToWarp(funcOp, workgroupSize))) {
