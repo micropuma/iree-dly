@@ -189,6 +189,7 @@ static void tileAndDistributeToWorkgroup(
         linalg::DistributionMethod::CyclicNumProcsEqNumIters));
     funcPassManager.addPass(createCSEPass());
     if (convertToDpsOptions) {
+      // 如果需要转换为DPS风格，添加转换Pass
       funcPassManager.addPass(
           createConvertToDestinationPassingStylePass(*convertToDpsOptions));
     }

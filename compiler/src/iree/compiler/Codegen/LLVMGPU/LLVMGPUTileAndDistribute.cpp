@@ -64,6 +64,7 @@ static LogicalResult tileReductionLoops(mlir::FunctionOpInterface funcOp) {
   return tileLinalgOpsWithFilter(funcOp, tilingOptions, filter);
 }
 
+/// 这个pass的作用是按照workgroup size来做tiling。
 static LogicalResult tileToSerialLoops(mlir::FunctionOpInterface funcOp) {
   {
     // Tile again at the workgroup level since redution dimension were
@@ -214,6 +215,7 @@ public:
 
   // debug1：tensor core
   void runOnOperation() override {
+    // 目前矩阵已经变成<32x128> x <128x32>的形式，接下来需要将其继续tile化，并根据warp做tile
     MLIRContext *context = &getContext();
     auto funcOp = getOperation();
 
@@ -221,6 +223,10 @@ public:
     // allocation. This needs to be done before reduction tiling.
     {
       RewritePatternSet promotionPatterns(&getContext());
+
+      // Adds patterns for promoting Linalg contract op's operands to use GPU shared
+      // memory.
+      // 这函数是mlir常见写法，其作用是将contract op pattern以及优化手段添加到promotionPatterns中
       populateContractPromotionPatterns(promotionPatterns, {2});
       if (failed(applyPatternsAndFoldGreedily(funcOp,
                                               std::move(promotionPatterns)))) {
@@ -232,6 +238,7 @@ public:
     // Tile again at the workgroup level since reduction dimension were
     // ignored. Dimensions already tiled will be ignore since we tile to the
     // same size.
+    // M,N,K先tile化M和N，如今tile化K，K被称为reduction dimension
     if (failed(tileToSerialLoops(funcOp))) {
       return signalPassFailure();
     }

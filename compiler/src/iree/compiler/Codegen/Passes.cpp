@@ -24,6 +24,8 @@
 
 namespace mlir::iree_compiler {
 
+// Registers IREE codegen passes with the provided pass manager registry.
+// 给IREE的用户提供了注册backend的接口。
 void registerCodegenPasses() {
   // Generated.
   registerCodegenCommonPasses();

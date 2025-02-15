@@ -223,18 +223,33 @@ void populateCombineVectorTransferReadBroadcastPatterns(
   patterns.add<CombineTransferReadOpBroadcast>(patterns.getContext());
 }
 
+/// 这段代码是 MLIR（Multi-Level Intermediate Representation）中的一个 重写模式（Rewrite Pattern），
+/// 它用于优化 linalg::MatmulOp、linalg::BatchMatmulOp 和 linalg::GenericOp，
+/// 具体是对某些操作数（operands）进行优化提升（promotion），使其在 workgroup memory（工作组共享内存） 中进行计算，
+/// 以提高计算效率（主要面向 GPU 计算） 
+/// 整个pass都是基于mlir提供的基于linalg的优化而来，需要系统学习linalg的优化。
 void populateContractPromotionPatterns(RewritePatternSet &patterns,
                                        ArrayRef<int64_t> operandsToPromote) {
+  // 一个整数数组，表示要提升（promote）到工作组共享内存的操作数索引（通常是 A, B 矩阵）
   MLIRContext *context = patterns.getContext();
+
+  // 将linalg::MatmulOp，linalg::BatchMatmulOp，linalg::GenericOp这三种op的operandsToPromote进行优化
+  // insert写法具体看PatternMatch.h的写法。
+  // LinalgPromotionPattern提供普适的linalg pattern的优化 
   patterns.insert<LinalgPromotionPattern<linalg::MatmulOp>,
                   LinalgPromotionPattern<linalg::BatchMatmulOp>,
                   LinalgPromotionPattern<linalg::GenericOp>>(
       context,
+      // 设定优化参数
       linalg::LinalgPromotionOptions()
+          // 设置内存释放函数
           .setAllocationDeallocationFns(allocateWorkgroupMemory,
                                         deallocateWorkgroupMemory)
+          // 设置拷贝函数
           .setCopyInOutFns(copyToWorkgroupMemory, copyToWorkgroupMemory)
+          // 指定要提升的操作数
           .setOperandsToPromote(operandsToPromote)
+          // 设置提升的维度
           .setUseFullTileBuffers({false, false}),
       LinalgTransformationFilter(
           {StringAttr::get(context, getWorkgroupKTiledMarker())},
@@ -243,6 +258,7 @@ void populateContractPromotionPatterns(RewritePatternSet &patterns,
           .addFilter(contractOpFilter));
 }
 
+// 常见的mlir pattern添加写法
 void populateDropSharedMemoryDeallocOpPatterns(RewritePatternSet &patterns) {
   patterns.add<DropSharedMemoryDeallocOp>(patterns.getContext());
 }
