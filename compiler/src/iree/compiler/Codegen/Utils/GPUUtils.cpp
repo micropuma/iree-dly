@@ -911,9 +911,12 @@ std::optional<SmallVector<int64_t>> getMmaNativeVectorSize(Operation *op) {
   return std::nullopt;
 }
 
+// 判断一个MemRefType是否是block级的共享内存
 bool hasSharedMemoryAddressSpace(MemRefType memrefType) {
+  // 获取memreftype的address space的属性
   auto addrSpace = llvm::dyn_cast_if_present<gpu::AddressSpaceAttr>(
       memrefType.getMemorySpace());
+  // 一个memtype有address space属性并且是AddressSpace::Workgroup
   return addrSpace &&
          addrSpace.getValue() == gpu::GPUDialect::getWorkgroupAddressSpace();
 }

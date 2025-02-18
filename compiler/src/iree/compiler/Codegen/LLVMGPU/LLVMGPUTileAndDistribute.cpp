@@ -334,6 +334,5 @@ LLVMGPUTileAndDistribute Pass的工作流程：
 std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
 createLLVMGPUTileAndDistributePass(bool distributeToWarp) {
   return std::make_unique<LLVMGPUTileAndDistributePass>(distributeToWarp);
-}
 
 } // namespace mlir::iree_compiler

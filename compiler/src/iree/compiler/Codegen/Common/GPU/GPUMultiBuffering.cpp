@@ -33,14 +33,20 @@ struct GPUMultiBufferingPass final
     // function. We can see memref.alloc in loops after bufferizing scf.forall
     // with promoted shared memory usage inside.
 
+    // 收集所有allocOp，并且是shared memory中开辟的
+    // 提前到func头部
     SmallVector<memref::AllocOp> allocs;
     // Collect all the alloc operations.
+    // 收集所有在shared memory中的内存空间开辟
     funcOp.walk([&](memref::AllocOp allocOp) {
+      // 如果是shared memory的分配，那么就将其移动到函数的entry block中
+      // 即multi-buffering优化是只针对shared memory的分配
       if (hasSharedMemoryAddressSpace(allocOp.getType()))
         allocs.push_back(allocOp);
     });
 
     assert(funcOp.getBlocks().size() == 1);
+    // 将所有allocOp放在funcOp的最前面
     for (memref::AllocOp allocOp : allocs) {
       if (allocOp->getParentOp() != funcOp)
         allocOp->moveBefore(&*funcOp.begin()->begin());
@@ -52,16 +58,23 @@ struct GPUMultiBufferingPass final
     // Collect all the alloc operations.
     funcOp.walk([&](memref::AllocOp allocOp) {
       // Skip allocations not used in a loop.
+      // 学习这里的写法：获取user list，以及判断user的所属operation
       for (Operation *user : allocOp->getUsers()) {
         auto loop = user->getParentOfType<scf::ForOp>();
         if (!loop)
           return WalkResult::advance();
       }
       allocs.push_back(allocOp);
+    
+      // Interrupt: the walk will be interrupted and no more operations, regions or blocks will be visited.
+      // Advance: the walk will continue.
+      // Skip: the walk of the current operation, region or block and their nested elements that haven't been visited already will be skipped and will continue with the next operation, region or block.
       return WalkResult::advance();
     });
     // Apply multi-buffering to all of them.
     for (memref::AllocOp alloc : allocs) {
+      // 这个pass的真正核心步骤，完成多缓冲的引入
+      // 辅助gpu软件流水线的设计
       if (failed(memref::multiBuffer(alloc, numBuffers))) {
         // Error out and stop if any buffer cannot be multi buffered, as future
         // software pipelining transformations will assume this happened.
