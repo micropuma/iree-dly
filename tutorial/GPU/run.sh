@@ -3,5 +3,6 @@ iree-compile --iree-hal-target-backends=cuda \
   --mlir-disable-threading \
   --mlir-elide-elementsattrs-if-larger=10 \
   --mlir-print-ir-after-all \
+  -debug-only=dialect-conversion \
   matmul.mlir -o test.vmfb \
   2>&1 | tee output.dump
