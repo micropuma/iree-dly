@@ -75,6 +75,10 @@ struct GPUMultiBufferingPass final
     for (memref::AllocOp alloc : allocs) {
       // 这个pass的真正核心步骤，完成多缓冲的引入
       // 辅助gpu软件流水线的设计
+      // 其核心是：
+      // 1. alloc op的使用者必须在for loop里
+      // 2. alloc op的使用者不能有loop-carried dependence
+      
       if (failed(memref::multiBuffer(alloc, numBuffers))) {
         // Error out and stop if any buffer cannot be multi buffered, as future
         // software pipelining transformations will assume this happened.
