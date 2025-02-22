@@ -601,6 +601,7 @@ void addGPUMatmulTensorCorePassPipeline(OpPassManager &funcPassManager,
   funcPassManager.addPass(
       createLLVMGPUTileAndDistributePass(/*distributeToWarp=*/true));
   funcPassManager.addPass(createRemoveSingleIterationLoopPass());
+  // 如果gpu的软件流水深度大于1，则会尝试multibuffer技术来overlap计算和数据传输的延迟开销
   if (pipelineDepth > 1) {
     funcPassManager.addPass(createGPUMultiBufferingPass(
         GPUMultiBufferingPassOptions{pipelineDepth}));
@@ -619,6 +620,9 @@ void addGPUMatmulTensorCorePassPipeline(OpPassManager &funcPassManager,
   funcPassManager.addPass(createCSEPass());
 
   // Linalg -> vector
+  // 有意思的优化点：将scalar code tensorize化，并且必须符合tensorcore的要求。
+  // 1. 向量化
+  // 2. linalg代码MMA化的过渡code
   funcPassManager.addPass(
       createLLVMGPUTensorCoreVectorizationPass(GPUTensorCoreType::WMMA));
   funcPassManager.addPass(memref::createFoldMemRefAliasOpsPass());
@@ -636,6 +640,7 @@ void addGPUMatmulTensorCorePassPipeline(OpPassManager &funcPassManager,
   }
 
   // Vector -> MMA ops
+  // 最底层的lowering转换模式，将vector code转换为tensor core code。
   funcPassManager.addPass(memref::createFoldMemRefAliasOpsPass());
   funcPassManager.addPass(createCanonicalizerPass());
   funcPassManager.addPass(createCSEPass());

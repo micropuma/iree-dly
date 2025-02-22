@@ -81,6 +81,11 @@ public:
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<vector::VectorDialect>();
   }
+
+  // %8 = vector.transfer_read %subview_8[%c0, %c0], %cst {in_bounds = [true, true]} : memref<16x16xf16, strided<[16, 1], offset: ?>, #gpu.address_space<workgroup>>, vector<16x16xf16>
+  // %9 = vector.transfer_read %subview_9[%c0, %c0], %cst {in_bounds = [true, true]} : memref<16x16xf16, strided<[32, 1], offset: ?>, #gpu.address_space<workgroup>>, vector<16x16xf16>
+  // %10 = vector.transfer_read %subview_10[%c0, %c0], %cst {in_bounds = [true, true]} : memref<16x16xf16, strided<[32, 1], offset: ?>, #gpu.address_space<workgroup>>, vector<16x16xf16>
+  // %11 = vector.contract {indexing_maps = [affine_map<(d0, d1, d2) -> (d0, d2)>, affine_map<(d0, d1, d2) -> (d2, d1)>, affine_map<(d0, d1, d2) -> (d0, d1)>], iterator_types = ["parallel", "parallel", "reduction"], kind = #vector.kind<add>} %8, %9, %10 : vector<16x16xf16>, vector<16x16xf16> into vector<16x16xf16>
   void runOnOperation() override {
     auto funcOp = getOperation();
     LLVM_DEBUG({
