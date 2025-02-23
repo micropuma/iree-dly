@@ -96,6 +96,7 @@ public:
     MLIRContext *context = &getContext();
     {
       // Step 1(a). Vectorize (linalg to vector).
+      // 核心算法：向量化linalg操作
       vectorizeLinalgOps(funcOp);
       RewritePatternSet contractionPatterns(context);
       vector::populateVectorTransferPermutationMapLoweringPatterns(
