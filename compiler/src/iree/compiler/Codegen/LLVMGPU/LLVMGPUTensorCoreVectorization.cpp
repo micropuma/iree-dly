@@ -173,7 +173,8 @@ public:
 
       bool useMmaSyncShape = tensorCoreType == GPUTensorCoreType::MMA_SYNC;
       // Step 4. Break and unroll warp tile size to native math and load sizes.
-      // 将warp size拆分为native math和load sizes
+      // 拆分成warp tile size 
+      // TODO: 这块详细debug
       RewritePatternSet vectorUnrollPatterns(context);
       populateVectorUnrollPatterns(vectorUnrollPatterns, useMmaSyncShape);
       if (failed(applyPatternsAndFoldGreedily(
