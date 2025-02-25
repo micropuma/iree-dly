@@ -35,14 +35,21 @@ namespace mlir::iree_compiler {
 static void vectorizeLinalgOps(mlir::FunctionOpInterface funcOp) {
   MLIRContext *context = funcOp.getContext();
   IRRewriter rewriter(context);
+
+  // 构建linalg 变化的过滤函数
+  // 关键过滤依赖getVectorizeMarker()函数
   LinalgTransformationFilter f(StringAttr::get(context, getVectorizeMarker()));
 
   funcOp.walk([&](Operation *op) {
+    // 1.使用过滤器，查看是否匹配
+    // 2.linalg::FillOp, linalg::GenericOp, linalg::ContractionOpInterface是必须匹配的项
     if (failed(f.checkAndNotify(rewriter, op)) ||
         !isa<linalg::FillOp, linalg::GenericOp, linalg::ContractionOpInterface>(
             op)) {
+      // 如果上述要求都不满足，则跳过
       return WalkResult::advance();
     }
+    // 针对该operation进行vectorize操作
     (void)linalg::vectorize(rewriter, op);
     return WalkResult::advance();
   });
@@ -86,6 +93,7 @@ public:
   // %9 = vector.transfer_read %subview_9[%c0, %c0], %cst {in_bounds = [true, true]} : memref<16x16xf16, strided<[32, 1], offset: ?>, #gpu.address_space<workgroup>>, vector<16x16xf16>
   // %10 = vector.transfer_read %subview_10[%c0, %c0], %cst {in_bounds = [true, true]} : memref<16x16xf16, strided<[32, 1], offset: ?>, #gpu.address_space<workgroup>>, vector<16x16xf16>
   // %11 = vector.contract {indexing_maps = [affine_map<(d0, d1, d2) -> (d0, d2)>, affine_map<(d0, d1, d2) -> (d2, d1)>, affine_map<(d0, d1, d2) -> (d0, d1)>], iterator_types = ["parallel", "parallel", "reduction"], kind = #vector.kind<add>} %8, %9, %10 : vector<16x16xf16>, vector<16x16xf16> into vector<16x16xf16>
+  // 上述codes是vectorization的核心代码，vector.contract是linalg的操作，%8, %9, %10是vector.transfer_read的结果，%11是vector.contract的结果
   void runOnOperation() override {
     auto funcOp = getOperation();
     LLVM_DEBUG({
@@ -96,7 +104,6 @@ public:
     MLIRContext *context = &getContext();
     {
       // Step 1(a). Vectorize (linalg to vector).
-      // 核心算法：向量化linalg操作
       vectorizeLinalgOps(funcOp);
       RewritePatternSet contractionPatterns(context);
       vector::populateVectorTransferPermutationMapLoweringPatterns(
@@ -116,6 +123,8 @@ public:
       // Linalg to vector conversion introduces arithmetic extensions on the
       // operands of vector contraction ops for mixed precision computation.
       // This pattern folds the arithmetic extensions into the vector.contract.
+      // 将算术扩展折叠到vector.contract中，因为tensor core适配混合精度，可能后续并不需要
+      // 这些算术扩展
       RewritePatternSet foldArithExtPatterns(context);
       vector::populateFoldArithExtensionPatterns(foldArithExtPatterns);
       if (failed(applyPatternsAndFoldGreedily(
@@ -124,6 +133,9 @@ public:
       }
 
       // Step 2. Fold consumer add ops into the contraction op itself.
+      // 很典型的producer consumer模式，将consumer add ops折叠到contraction op中
+      // 以减少内存访问
+      // TODO:需要继续深入contract op的实现
       RewritePatternSet canonicalizationPatterns(context);
       vector::ContractionOp::getCanonicalizationPatterns(
           canonicalizationPatterns, context);
@@ -140,7 +152,7 @@ public:
       });
 
       // Step 3. Prepare vector operations to be lowered to native tensor core
-      // operations (nvgpu.mmasync, nvgpu.ldmatrix).
+      // operations (nvgpu.mmasync, nvgpu.ldmatrix). 
       if (tensorCoreType == GPUTensorCoreType::MMA_SYNC) {
         RewritePatternSet vectorContractPatterns(funcOp.getContext());
         mlir::vector::populateCastAwayVectorLeadingOneDimPatterns(
@@ -161,6 +173,7 @@ public:
 
       bool useMmaSyncShape = tensorCoreType == GPUTensorCoreType::MMA_SYNC;
       // Step 4. Break and unroll warp tile size to native math and load sizes.
+      // 将warp size拆分为native math和load sizes
       RewritePatternSet vectorUnrollPatterns(context);
       populateVectorUnrollPatterns(vectorUnrollPatterns, useMmaSyncShape);
       if (failed(applyPatternsAndFoldGreedily(
