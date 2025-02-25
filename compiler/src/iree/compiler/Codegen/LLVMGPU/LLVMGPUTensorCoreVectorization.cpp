@@ -55,6 +55,7 @@ static void vectorizeLinalgOps(mlir::FunctionOpInterface funcOp) {
   });
 }
 
+// 将vector进行展开，这里的展开是指将vector转换为native tensor core operations
 static void populateVectorUnrollPatterns(RewritePatternSet &patterns,
                                          bool useMmaSyncShape) {
   auto unrollOrder = [](Operation *op) -> std::optional<SmallVector<int64_t>> {
@@ -135,7 +136,7 @@ public:
       // Step 2. Fold consumer add ops into the contraction op itself.
       // 很典型的producer consumer模式，将consumer add ops折叠到contraction op中
       // 以减少内存访问
-      // TODO:需要继续深入contract op的实现
+      // TODO-tensor-core:需要继续深入contract op的实现
       RewritePatternSet canonicalizationPatterns(context);
       vector::ContractionOp::getCanonicalizationPatterns(
           canonicalizationPatterns, context);
@@ -174,7 +175,7 @@ public:
       bool useMmaSyncShape = tensorCoreType == GPUTensorCoreType::MMA_SYNC;
       // Step 4. Break and unroll warp tile size to native math and load sizes.
       // 拆分成warp tile size 
-      // TODO: 这块详细debug
+      // TODO-tensor-core: 这块详细debug
       RewritePatternSet vectorUnrollPatterns(context);
       populateVectorUnrollPatterns(vectorUnrollPatterns, useMmaSyncShape);
       if (failed(applyPatternsAndFoldGreedily(
