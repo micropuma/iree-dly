@@ -14,11 +14,14 @@
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/PatternMatch.h"
 
+// 这段代码值得阅读，包含GPU相关的所有优化pattern
+
 namespace mlir::iree_compiler {
 
 namespace {
 /// Applies tranformation to drop unit dims in destination vector.transfer_read
 /// destination so that the resulting vector is 2D.
+/// 将目标vector.transfer_read中的单位维度删除，以便结果向量为2D。
 //
 /// Example:
 /// ```
@@ -35,24 +38,32 @@ namespace {
 /// #map = affine_map<(d0, d1) -> (d0 * 4096 + d1 + 8964)>
 /// %c0 = arith.constant 0 : index
 /// %cst = arith.constant 0.000000e+00 : f32
+/// 通过memref.subview获取内存视图
 /// %0 = memref.subview %arg0[2, 3, 4] [16, 1, 8] [1, 1, 1]
 ///      : memref<128x16x256xf32> to memref<16x8xf32, #map>
 /// %1 = vector.transfer_read %0[%c0, %c0], %cst {in_bounds = [true, true]}
 ///      : memref<16x8xf32, #map>, vector<16x8xf32>
+/// 显示广播操作
 /// %2 = vector.broadcast %1 : vector<16x8xf32> to  vector<1x16x8xf32>
 /// %3 = vector.transpose %2, [1, 0, 2]
 ///      : vector<1x16x8xf32> to vector<16x1x8xf32>
 /// ```
+/// 这个pattern的作用是将transferread操作扁平化，即变成memref.subview，transfer_read，以及transpose，broadcast
+/// 等底层组合operation
+/// 通过上述组合，尽量得到一个2D的vector，因为MMA只支持2D的vector
 struct FlattenTransferReadOp : public OpRewritePattern<vector::TransferReadOp> {
   using OpRewritePattern::OpRewritePattern;
 
   LogicalResult matchAndRewrite(vector::TransferReadOp transferReadOp,
                                 PatternRewriter &rewriter) const override {
+    /// %0 = vector.transfer_read %a[%c2, %c3, %c4], %cst {in_bounds = [true, true, true]}
+    ///   : memref<128x16x256xf32>, vector<16x1x8xf32> 
     auto loc = transferReadOp.getLoc();
     Value vector = transferReadOp.getVector();
     VectorType vectorType = llvm::cast<VectorType>(vector.getType());
     Value source = transferReadOp.getSource();
     MemRefType sourceType = llvm::dyn_cast<MemRefType>(source.getType());
+
     // Contiguity check is valid on tensors only.
     if (!sourceType)
       return failure();
@@ -75,6 +86,7 @@ struct FlattenTransferReadOp : public OpRewritePattern<vector::TransferReadOp> {
     // exist
     int indexOfOuterNonUnitDim = vectorType.getRank() - 2;
     for (int i = 0; i < vectorType.getRank() - 1; i++) {
+      // 默认内维一定是非单位维度
       if (vectorType.getShape()[i] != 1) {
         numberOfNonUnitDims++;
         indexOfOuterNonUnitDim = i;
@@ -149,31 +161,47 @@ struct FlattenTransferReadOp : public OpRewritePattern<vector::TransferReadOp> {
 
 // Merges transpose op into the transfer read op. Transpose are not supported on
 // MMA types but MMA load can transpose the matrix when loading.
+// 这里的pattern转换，一切都是为了适配MMA计算
 struct CombineTransferReadOpBroadcast final
     : public OpRewritePattern<vector::BroadcastOp> {
   using OpRewritePattern<vector::BroadcastOp>::OpRewritePattern;
 
+  // 针对broadcast op的rewrite
   LogicalResult matchAndRewrite(vector::BroadcastOp op,
                                 PatternRewriter &rewriter) const override {
+    // 判断该broadcastOp的source 是否是一个vector.transfer_read op
     auto transferReadOp =
         op.getSource().getDefiningOp<vector::TransferReadOp>();
+    // 特殊判断transfer_readOp是否有mask，或是bound约束
     if (!transferReadOp || transferReadOp.getMask() ||
         transferReadOp.hasOutOfBoundsDim()) {
       return failure();
     }
+
+    // 通过broadcast op的shape和transfer_read op的shape进行比较
+    // 来判断需要broadcast的维度
     int64_t rankDiff = op.getResultVectorType().getRank() -
                        transferReadOp.getVectorType().getRank();
+    // exprs = [0, 0, 0]，是一个包含 3 个值为 0 的仿射常数表达式的向量
+    // 单纯地将diff shape全部映射为零
     SmallVector<AffineExpr> exprs(rankDiff, rewriter.getAffineConstantExpr(0));
     ArrayRef<AffineExpr> originalExpr =
         transferReadOp.getPermutationMap().getResults();
+
+    // 原始的expr：[d0, d1, d2]，permutation后是[d2,d1,d0]，diff的exprs是[0, 0, 0]，所以合并后的exprs是[0, 0, 0, d2, d1, d0]
     exprs.append(originalExpr.begin(), originalExpr.end());
+
     AffineMap newMap =
         AffineMap::get(transferReadOp.getPermutationMap().getNumDims(),
                        transferReadOp.getPermutationMap().getNumSymbols(),
                        exprs, op.getContext());
+    // 指定result 的每个维度，都需要bool。
     ArrayAttr inBounds = rewriter.getBoolArrayAttr(
         SmallVector<bool>(op.getResultVectorType().getRank(), true));
+    // 将broadcastOp重写，使得broadcastOp和transfer_readOp合并
     rewriter.replaceOpWithNewOp<vector::TransferReadOp>(
+        // 第一个op是old op，后续均是新op的参数
+        // auto newOp = create<OpTy>(op->getLoc(), std::forward<Args>(args)...);
         op, op.getType(), transferReadOp.getSource(),
         transferReadOp.getIndices(), newMap, transferReadOp.getPadding(),
         transferReadOp.getMask(), inBounds);
@@ -182,6 +210,7 @@ struct CombineTransferReadOpBroadcast final
 };
 
 /// Returns true if op is appropriate contract for promotion.
+/// 过滤适合提升的op
 static LogicalResult contractOpFilter(Operation *op) {
   auto linalgOp = dyn_cast<linalg::LinalgOp>(op);
   if (!linalgOp)
@@ -213,11 +242,13 @@ struct DropSharedMemoryDeallocOp : public OpRewritePattern<memref::DeallocOp> {
 
 } // namespace
 
+// MMA没法支持transfer_read做很多事情，必须拆分成MMA可以实现的原子操作
 void populateVectorTransferToGPUMMAPreparationPatterns(
     RewritePatternSet &patterns) {
   patterns.add<FlattenTransferReadOp>(patterns.getContext());
 }
 
+// 将对于vector的transfer read op和broadcast op合并
 void populateCombineVectorTransferReadBroadcastPatterns(
     RewritePatternSet &patterns) {
   patterns.add<CombineTransferReadOpBroadcast>(patterns.getContext());

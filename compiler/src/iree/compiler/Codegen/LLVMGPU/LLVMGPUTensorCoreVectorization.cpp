@@ -66,7 +66,9 @@ static void populateVectorUnrollPatterns(RewritePatternSet &patterns,
   };
   auto getNativeShape = [useMmaSyncShape](Operation *op) {
     if (useMmaSyncShape)
+      // 强调warp之间的协同，一般更复杂
       return getMmaNativeVectorSize(op);
+    // 性能更优，但是warp之间的协同更简单
     return getWmmaNativeVectorSize(op);
   };
   vector::populateVectorUnrollPatterns(
@@ -109,7 +111,21 @@ public:
       RewritePatternSet contractionPatterns(context);
       vector::populateVectorTransferPermutationMapLoweringPatterns(
           contractionPatterns);
+      /// Collect patterns to convert reduction op to vector.contract and fold
+      /// transpose/broadcast ops into the contract.
       vector::populateVectorReductionToContractPatterns(contractionPatterns);
+      /// Patterns that remove redundant Vector Ops by re-ordering them with
+      /// e.g. elementwise Ops:
+      /// ```
+      /// %at = vector.transpose %a, [1, 0]: vector<4x2xf32> to vector<2x4xf32>
+      /// %bt = vector.transpose %b, [1, 0]: vector<4x2xf32> to vector<2x4xf32>
+      /// %r = arith.addf %at, %bt : vector<2x4xf32>
+      /// ```
+      /// gets converted to:
+      /// ```
+      /// %0 = arith.addf %a, %b : vector<4x2xf32>
+      /// %r = vector.transpose %0, [1, 0] : vector<2x4xf32>
+      /// ```
       vector::populateSinkVectorOpsPatterns(contractionPatterns);
       if (failed(applyPatternsAndFoldGreedily(
               funcOp, std::move(contractionPatterns)))) {
@@ -140,6 +156,8 @@ public:
       RewritePatternSet canonicalizationPatterns(context);
       vector::ContractionOp::getCanonicalizationPatterns(
           canonicalizationPatterns, context);
+
+      // tensor core的MMA计算不支持transpose op，但是MMA的read算子支持按照transpose的方式transfer tensor
       populateCombineVectorTransferReadBroadcastPatterns(
           canonicalizationPatterns);
       if (failed(applyPatternsAndFoldGreedily(
@@ -158,6 +176,11 @@ public:
         RewritePatternSet vectorContractPatterns(funcOp.getContext());
         mlir::vector::populateCastAwayVectorLeadingOneDimPatterns(
             vectorContractPatterns);
+
+        /// Patterns to transform vector ops into a canonical form to convert to MMA
+        /// matrix operations. If `useNvGpu` is true, then the patterns will populated
+        /// will prepare for conversion to `nvgpu` mma operations rather than the `gpu`
+        /// dialect WMMA operations.
         mlir::populatePrepareVectorToMMAPatterns(vectorContractPatterns,
                                                  /*useMMASync=*/true);
         if (failed(applyPatternsAndFoldGreedily(
