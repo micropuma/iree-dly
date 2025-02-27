@@ -45,6 +45,7 @@ IREE::Codegen::TranslationInfoAttr
 getTranslationInfo(mlir::FunctionOpInterface funcOp);
 
 /// Returns the workgroup size specified on the `exportOp`.
+// 在translation info中指定：workgroup_size = [64, 2, 1]
 std::optional<SmallVector<int64_t>>
 getWorkgroupSize(mlir::FunctionOpInterface funcOp);
 

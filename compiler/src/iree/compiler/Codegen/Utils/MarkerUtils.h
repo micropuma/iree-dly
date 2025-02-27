@@ -115,6 +115,7 @@ StringRef getMarkerOrNull(Operation *op);
 
 /// Returns true if an operation has the specified `marker`. When `marker` is
 /// empty, returns true if the operation has any marker.
+/// 用来判断一个operation是否有对应特定的attribute
 bool hasMarker(Operation *, ArrayRef<StringRef> markers = {});
 
 /// Sets a given marker on an operation.

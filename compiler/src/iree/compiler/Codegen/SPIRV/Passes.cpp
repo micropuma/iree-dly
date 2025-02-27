@@ -389,6 +389,7 @@ void addSPIRVCooperativeMatrixVectorizePassPipeline(
   funcPassManager.addPass(
       createSPIRVTileAndPromotePass(SPIRVTileAndPromotePassOptions{
           /*promoteCMatrix=*/true, /*skipThreadLevel=*/true}));
+  // 移除确信只会循环一次的loop
   funcPassManager.addPass(createRemoveSingleIterationLoopPass());
   // Run canonicalization patterns to propagate constant shape sizes after
   // removing trip-one loops.
@@ -406,6 +407,8 @@ void addSPIRVCooperativeMatrixVectorizePassPipeline(
     funcPassManager.addPass(createGPUMultiBufferingPass(
         GPUMultiBufferingPassOptions{pipelineDepth + 1}));
   }
+
+  // Convert memref.copy to linalg op
   funcPassManager.addPass(createMemrefCopyToLinalgPass());
   funcPassManager.addPass(createGPUDistributeSharedMemoryCopyPass());
 

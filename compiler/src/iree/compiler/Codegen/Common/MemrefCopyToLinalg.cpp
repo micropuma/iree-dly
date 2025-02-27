@@ -22,6 +22,7 @@ struct MemrefCopyOpToLinalg : public OpRewritePattern<memref::CopyOp> {
 
   LogicalResult matchAndRewrite(memref::CopyOp copyOp,
                                 PatternRewriter &rewriter) const override {
+    // 核心逻辑特别简单：用linalg.copy替换memref.copy
     Operation *linalgCopy =
         createLinalgCopyOp(rewriter, copyOp.getLoc(), copyOp.getSource(),
                            copyOp.getTarget(), copyOp->getAttrs());
@@ -39,9 +40,12 @@ struct MemrefCopyToLinalgPass final
   }
 
   void runOnOperation() override {
+    // 注册memref copy到linalg copy的pattern
     MLIRContext *context = &getContext();
     RewritePatternSet patterns(&getContext());
     patterns.insert<MemrefCopyOpToLinalg>(context);
+
+    // 应用pattern
     if (failed(applyPatternsAndFoldGreedily(getOperation(),
                                             std::move(patterns)))) {
       return signalPassFailure();

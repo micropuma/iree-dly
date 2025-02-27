@@ -29,6 +29,10 @@ namespace mlir::iree_compiler {
 #define GEN_PASS_DEF_GPUDISTRIBUTESHAREDMEMORYCOPYPASS
 #include "iree/compiler/Codegen/Common/GPU/Passes.h.inc"
 
+
+/// 优化GPU上的共享内存复制操作，使其更加高效。
+// 它通过多种技术（如切分、分发、矢量化、循环展开）来确保GPU资源得到最充分的利用，从而加速计算过程。
+
 namespace {
 //====---------------------------------------------------------------------===//
 // Pass to lower workgroup memory copy to distibuted
@@ -368,6 +372,7 @@ unrollSharedMemoryLoops(mlir::FunctionOpInterface funcOp,
 } // namespace
 
 LogicalResult gpuDistributeSharedMemoryCopy(mlir::FunctionOpInterface funcOp) {
+  // small_vector<>存储workgroup size的信息
   auto maybeWorkgroupSize = getWorkgroupSize(funcOp);
   if (!maybeWorkgroupSize) {
     return funcOp.emitOpError("failed to distribute shared memory copy since "
@@ -378,6 +383,9 @@ LogicalResult gpuDistributeSharedMemoryCopy(mlir::FunctionOpInterface funcOp) {
   MLIRContext *context = funcOp.getContext();
   SmallVector<linalg::GenericOp> copiesToWorkgroupMem;
   funcOp.walk([&](linalg::GenericOp copyOp) {
+    // getCopyToWorkgroupMemoryMarker是一个stringref，用于标记：
+    // Marker for copy operations that are moving data from StorageClass to
+    // Workgroup memory.
     if (hasMarker(copyOp, getCopyToWorkgroupMemoryMarker()))
       copiesToWorkgroupMem.push_back(copyOp);
   });

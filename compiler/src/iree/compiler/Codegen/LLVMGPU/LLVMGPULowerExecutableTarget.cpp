@@ -98,6 +98,7 @@ void LLVMGPULowerExecutableTargetPass::runOnOperation() {
   IREE::GPU::GPUPipelineOptions pipelineOptions =
       IREE::GPU::getPipelineOptions(funcOp, translationInfo);
 
+  // 根据translation info，选择对应的executable生成的dispatch lowering pipeline
   switch (translationInfo.getDispatchLoweringPassPipeline()) {
   case IREE::Codegen::DispatchLoweringPassPipeline::LLVMGPUDefault:
     addGPUDefaultPassPipeline(pipeline, pipelineOptions);

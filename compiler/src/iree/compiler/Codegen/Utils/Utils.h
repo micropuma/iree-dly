@@ -177,6 +177,7 @@ void setSCFTileSizes(scf::SCFTilingOptions &options, TilingInterface op,
                      ArrayRef<int64_t> tileSizes,
                      ArrayRef<bool> tileScalableFlags);
 
+// 辅助将memref::copy转换为linalg.copy
 Operation *createLinalgCopyOp(OpBuilder &b, Location loc, Value from, Value to,
                               ArrayRef<NamedAttribute> attributes = {});
 

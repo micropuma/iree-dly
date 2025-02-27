@@ -609,6 +609,7 @@ void addGPUMatmulTensorCorePassPipeline(OpPassManager &funcPassManager,
   funcPassManager.addPass(createCanonicalizerPass());
   funcPassManager.addPass(createCSEPass());
 
+  // 移除只循环一次的loop
   funcPassManager.addPass(createRemoveSingleIterationLoopPass());
 
   ReorderWorkgroupsStrategy reorderStrategy =
@@ -622,7 +623,7 @@ void addGPUMatmulTensorCorePassPipeline(OpPassManager &funcPassManager,
   // Linalg -> vector
   // 有意思的优化点：将scalar code tensorize化，并且必须符合tensorcore的要求。
   // 1. 向量化
-  // 2. linalg代码MMA化的过渡code
+  // 2. linalg代码MMA化的过渡code：不支持的操作如broadcast，需要memref.subview, transpose等显示转换
   funcPassManager.addPass(
       createLLVMGPUTensorCoreVectorizationPass(GPUTensorCoreType::WMMA));
   funcPassManager.addPass(memref::createFoldMemRefAliasOpsPass());
@@ -631,16 +632,18 @@ void addGPUMatmulTensorCorePassPipeline(OpPassManager &funcPassManager,
   funcPassManager.addPass(createOptimizeTensorInsertExtractSlicesPass());
 
   // Distribute shared memory copies.
+  // Convert memref.copy to linalg op
   funcPassManager.addPass(createMemrefCopyToLinalgPass());
+  // Pass to distribute shared memory copies to threads. 
   funcPassManager.addPass(createGPUDistributeSharedMemoryCopyPass());
   funcPassManager.addPass(createCanonicalizerPass());
   funcPassManager.addPass(createCSEPass());
+  // Pass to try to reduce the number of bank conflicts by padding memref.alloc ops.
   if (options.enableReduceSharedMemoryBankConflicts) {
     funcPassManager.addPass(createGPUReduceBankConflictsPass());
   }
 
   // Vector -> MMA ops
-  // 最底层的lowering转换模式，将vector code转换为tensor core code。
   funcPassManager.addPass(memref::createFoldMemRefAliasOpsPass());
   funcPassManager.addPass(createCanonicalizerPass());
   funcPassManager.addPass(createCSEPass());
@@ -1069,6 +1072,8 @@ addLowerAndOptimizeAddressComputationPasses(FunctionLikeNest &funcPassManager) {
       .addPass(createLowerAffinePass);
 }
 
+// 这个函数是整个pipeline的入口，这个函数会被iree_compiler调用。
+// 包含lower到LLVMGPU的所有pass的pipeline
 static void addLowerToLLVMGPUPasses(OpPassManager &modulePassManager,
                                     bool forROCDL) {
   modulePassManager.addPass(
