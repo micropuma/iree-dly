@@ -262,6 +262,7 @@ static LogicalResult lowerWorkgroupCount(
 
 namespace {
 
+// 一个比较普适的pass
 struct TileAndDistributeToWorkgroupsPass final
     : impl::TileAndDistributeToWorkgroupsPassBase<
           TileAndDistributeToWorkgroupsPass> {

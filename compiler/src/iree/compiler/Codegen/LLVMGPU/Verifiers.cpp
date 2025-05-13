@@ -65,8 +65,10 @@ getInstructionShape(Operation *op, CodeGenPipeline pipeline,
   // 我们的pipeline是LLVMGPUMatmulTensorCore
   case CodeGenPipeline::LLVMGPUMatmulTensorCore:
     // Tensor Core Pipeline / WMMA API
+    // 对于F16和BF16，tensorcore是16x16x16
     if (inputElementType.isF16() || inputElementType.isBF16()) {
       instructionShape = {16, 16, 16};
+    // 对于F32，tensorcore是16x16x8
     } else if (inputElementType.isF32()) {
       instructionShape = {16, 16, 8};
     } else {
@@ -119,6 +121,7 @@ verifyGPUMatmulPipeline(Operation *op,
     return success();
   }
   // Only verify batched and unbatched matmul.
+  // 只支持对于批矩阵乘和矩阵乘运算做codegen matmul
   if (!isa<linalg::MatmulOp, linalg::BatchMatmulOp>(op)) {
     return success();
   }
@@ -246,10 +249,12 @@ verifyGPUMatmulPipeline(Operation *op,
 
   // Number of warps in x, y, and z dim.
   // 计算一个workgroup的warp数目
+  // warp一般为32，如果一个workgroup是[64,2,1]，则这里得到[2,2,1]维度的warp
   SmallVector<int64_t> numWarps{workgroupSize[kDimX] / kWarpSize,
                                 workgroupSize[kDimY], workgroupSize[kDimZ]};
 
   // Matrix-multiply problem shape in number of elements in M, N, and K dim.
+  // matmulshape为[512, 512, 128]
   // 获取矩阵最本元的MNK参数。
   SmallVector<int64_t> matmulShape{lhsShape[0], rhsShape[1], lhsShape[1]};
 
@@ -263,6 +268,7 @@ verifyGPUMatmulPipeline(Operation *op,
       x 维度 warp 对应问题的 N；
       z 维度 warp 对应问题的 K；
   */
+  // [32/2, 32/2, 16/1] = [16, 16, 16]表征每个warp所要干的工作
   SmallVector<int64_t> warpShape{threadBlockShape[kM] / numWarps[kDimY],
                                  threadBlockShape[kN] / numWarps[kDimX],
                                  threadBlockShape[kK] / numWarps[kDimZ]};
@@ -270,6 +276,7 @@ verifyGPUMatmulPipeline(Operation *op,
   // Instruction shape in number of elements in M, N, and K dim.
   // 获取tensor core指令形状
   SmallVector<int64_t> instructionShape;
+  // f16 和 bf16 类型对应的指令形状为 {16, 16, 16}，而 f32 类型对应 {16, 16, 8} 
   if (failed(getInstructionShape(
           op, pipeline, llvm::cast<ShapedType>(lhsType).getElementType(),
           instructionShape))) {
@@ -278,7 +285,8 @@ verifyGPUMatmulPipeline(Operation *op,
 
   // Verify that matmul problem shape can be tiled with the thread block shape.
   // TODO: This check should be relaxed as we allow unaligned matmul shapes.
-  // 要求矩阵问题的每个维度（M、N、K）能够被线程块相应的维度整除。
+  // 要求矩阵问题的每个维度（M、N、K）能够被tile设定的维度整除，来决策是否可以做tiling运算
+  // 检测[512%32, 512%32, 128%16]
   if (matmulShape[kM] % threadBlockShape[kM] != 0 ||
       matmulShape[kN] % threadBlockShape[kN] != 0 ||
       matmulShape[kK] % threadBlockShape[kK] != 0) {
@@ -291,6 +299,7 @@ verifyGPUMatmulPipeline(Operation *op,
   // instruction shape.
   // 确保每个 warp tile（即 warpShape）在 M、N、K 维度上均可以被对应的 Tensor Core 指令形状整除。
   // 若不满足，则说明硬件的计算单元（Tensor Core）无法完美地覆盖 warp tile
+  // 以f16为例，为[16,16,16]，即每个warp的计算，是否可以生成Tensor Core指令
   if (warpShape[kM] % instructionShape[kM] != 0 ||
       warpShape[kN] % instructionShape[kN] != 0 ||
       warpShape[kK] % instructionShape[kK] != 0) {

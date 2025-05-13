@@ -34,19 +34,24 @@ namespace mlir::iree_compiler {
 static LogicalResult tileReductionLoops(mlir::FunctionOpInterface funcOp) {
   auto tileSizesFn = [](OpBuilder &builder,
                         Operation *op) -> SmallVector<OpFoldResult> {
-    auto interfaceOp = cast<PartitionableLoopsInterface>(*op);
+    auto interfaceOp = cast<PartitionableLoopsInterface>(*op);      // 获取可分块的循环组
+
+    // Returns the loop IDs (0 being outermost) that are partitionable.
+    // 
+    // If `maxNumPartitionedLoops` is passed the size of the vector returned
+    // is always lesser than the value.
     auto partitionedLoops =
-        interfaceOp.getPartitionableLoops(kNumMaxParallelDims);
+        interfaceOp.getPartitionableLoops(kNumMaxParallelDims);                // 获取已在workgroup中分块的循环         
     SmallVector<OpFoldResult> tileSizes =
         getAsIndexOpFoldResult(op->getContext(), getTileSizes(op, 0));
     auto zeroAttr = builder.getIndexAttr(0);
-    for (unsigned depth : partitionedLoops) {
-      if (depth < tileSizes.size()) {
+    for (unsigned depth : partitionedLoops) {             
+      if (depth < tileSizes.size()) {                // 将已分配到工作组的并行循环平铺尺寸设为0（跳过）
         tileSizes[depth] = zeroAttr;
       }
     }
 
-    int numLoops = cast<TilingInterface>(op).getLoopIteratorTypes().size();
+    int numLoops = cast<TilingInterface>(op).getLoopIteratorTypes().size();                       //  ​​确保分块尺寸向量（tileSizes）的长度与操作的循环维度数量一致​​，并为未明确指定分块大小的维度设置默认不分块（即分块大小为0）       
     tileSizes.resize(numLoops, zeroAttr);
     return tileSizes;
   };
@@ -55,10 +60,10 @@ static LogicalResult tileReductionLoops(mlir::FunctionOpInterface funcOp) {
       scf::SCFTilingOptions().setTileSizeComputationFunction(tileSizesFn);
 
   MLIRContext *context = funcOp.getContext();
-  LinalgTransformationFilter filter(
+  LinalgTransformationFilter filter(                                                                   //  处理源操作中带有workgroup memory标记的操作
       ArrayRef<StringAttr>{
           StringAttr::get(context, getWorkgroupMemoryMarker())},
-      StringAttr::get(context, getWorkgroupKTiledMarker()));
+      StringAttr::get(context, getWorkgroupKTiledMarker()));                        // 处理好后的打上tilemarker
   filter.setMatchByDefault();
 
   return tileLinalgOpsWithFilter(funcOp, tilingOptions, filter);
@@ -214,8 +219,7 @@ public:
   }
 
   // debug1：tensor core
-  void runOnOperation() override {
-    // 目前矩阵已经变成<32x128> x <128x32>的形式，接下来需要将其继续tile化，并根据warp做tile
+  void runOnOperation() override {   
     MLIRContext *context = &getContext();
     auto funcOp = getOperation();
 
@@ -226,19 +230,17 @@ public:
 
       // Adds patterns for promoting Linalg contract op's operands to use GPU shared
       // memory.
-      // 这函数是mlir常见写法，其作用是将contract op pattern以及优化手段添加到promotionPatterns中
       populateContractPromotionPatterns(promotionPatterns, {2});
       if (failed(applyPatternsAndFoldGreedily(funcOp,
                                               std::move(promotionPatterns)))) {
         return signalPassFailure();
       }
-      propagateSharedMemoryCopy(funcOp);
+      propagateSharedMemoryCopy(funcOp);    // 显示取消拷贝入共享内存操作，改为直接写入共享内存/或是内联入linalg.genericOp的方式
     }
 
     // Tile again at the workgroup level since reduction dimension were
     // ignored. Dimensions already tiled will be ignore since we tile to the
     // same size.
-    // M,N,K先tile化M和N，如今tile化K，K被称为reduction dimension
     if (failed(tileToSerialLoops(funcOp))) {
       return signalPassFailure();
     }
@@ -287,7 +289,6 @@ public:
       funcOp.dump();
     });
 
-    // 理解的一个关键点，根据warp：32个线程，做进一步分块操作。
     if (distributeToWarp) {
       // Apply last level of tiling and distribute to warps.
       if (failed(tileToWarp(funcOp, workgroupSize))) {

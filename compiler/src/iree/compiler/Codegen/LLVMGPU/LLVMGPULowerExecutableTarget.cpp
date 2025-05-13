@@ -43,6 +43,7 @@ namespace mlir::iree_compiler {
 #include "iree/compiler/Codegen/LLVMGPU/Passes.h.inc"
 
 namespace {
+/// 一段代码可以有好多的hal.executable.variant，比如面向不同版本的GPU（sm70,75,80）。
 /// Lowers an hal.executable.variant operation to scalar/native-vector
 /// code. Invokes different compilation pipeline to
 /// - first lower to scalar/native-vector code
@@ -119,6 +120,11 @@ void LLVMGPULowerExecutableTargetPass::runOnOperation() {
     addGPUMatmulSimtPassPipeline(pipeline, pipelineOptions);
     break;
   case IREE::Codegen::DispatchLoweringPassPipeline::LLVMGPUMatmulTensorCore: {
+    // 这个pass pipeline比较有意思，可以debug一下
+    // tensor core生成逻辑
+    // Tile and distribute operations to workgroups
+
+    // 这个函数自动获取pipeline元信息
     FailureOr<int64_t> maybeDepth =
         getSoftwarePipelineDepth(translationInfo.getConfiguration());
     if (failed(maybeDepth)) {

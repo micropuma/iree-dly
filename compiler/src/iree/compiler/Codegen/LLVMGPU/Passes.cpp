@@ -205,6 +205,7 @@ static void tileAndDistributeToWorkgroup(
 static void tileAndBufferize(OpPassManager &funcPassManager) {
   ConvertToDestinationPassingStylePassOptions options;
   options.useWARForCooperativeMatrixCodegen = true;
+  // L3层tiling，面向workgroup做tiling
   tileAndDistributeToWorkgroup(funcPassManager, /*useForall=*/false,
                                /*convertToDpsOptions=*/options);
   addBufferizePasses(funcPassManager);

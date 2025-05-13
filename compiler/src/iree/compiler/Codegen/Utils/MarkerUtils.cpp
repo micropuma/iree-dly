@@ -35,7 +35,7 @@ LinalgTransformationFilter::LinalgTransformationFilter(
 LogicalResult LinalgTransformationFilter::checkAndNotify(RewriterBase &rewriter,
                                                          Operation *op) const {
   if (llvm::any_of(filters,
-                   [&](const FilterFunction &f) { return failed(f(op)); })) {
+                   [&](const FilterFunction &f) { return failed(f(op)); })) {        // 给operation应用每个FilterFunciton
     return failure();
   }
 
@@ -57,7 +57,7 @@ LogicalResult LinalgTransformationFilter::checkAndNotify(RewriterBase &rewriter,
 
   // 4. Match explicit filter.
   for (auto filter : matchDisjunction) {
-    if (attr.getValue() == filter) {
+    if (attr.getValue() == filter) {                    // 在tilek这个场景下，filter是workgroup_memory，即这个operation在filter中是需要处理的
       return success();
     }
   }
@@ -71,6 +71,7 @@ LogicalResult LinalgTransformationFilter::checkAndNotify(RewriterBase &rewriter,
 
 void LinalgTransformationFilter::replaceLinalgTransformationFilter(
     RewriterBase &rewriter, Operation *op) const {
+  // 如果指定替换，则替换kLinalgTransformMarker的attr为新的replacement，否则单纯删除kLinalgTransformMarker
   if (replacement.has_value()) {
     op->setAttr(LinalgTransforms::kLinalgTransformMarker, replacement.value());
   } else {
@@ -128,11 +129,13 @@ StringRef getMarkerOrNull(Operation *op) {
   return attr.getValue();
 }
 
-bool hasMarker(Operation *op, ArrayRef<StringRef> marker) {
+// memref.copy %subview_2, %subview_1 {__internal_linalg_transform__ = "copy_to_workgroup_memory"}
+// 为例，copy_to_workgroup_memory是一个kLinalgTransformMarker的值 
+bool hasMarker(Operation *op, ArrayRef<StringRef> marker) {          // 辅助函数，判断一个operation是否有某个marker
   StringAttr attr =
       op->getAttrOfType<StringAttr>(LinalgTransforms::kLinalgTransformMarker);
   return attr && (marker.empty() ||
-                  llvm::any_of(marker, [&attr](StringRef markerValue) {
+                  llvm::any_of(marker, [&attr](StringRef markerValue) {     // llvm::any_of底层是std::any_of(marker.begin(), marker.end(), lambad函数)
                     return attr.getValue() == markerValue;
                   }));
 }

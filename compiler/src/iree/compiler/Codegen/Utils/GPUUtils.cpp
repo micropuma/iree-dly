@@ -260,10 +260,10 @@ LogicalResult copyToWorkgroupMemory(OpBuilder &b, Value src, Value dst) {
   return success();
 }
 
-static bool propagateCopyDestIntoProducerFill(memref::CopyOp copyOp) {
+static bool propagateCopyDestIntoProducerFill(memref::CopyOp copyOp) {    // 辅助函数，将copyOp的目标位置的值直接写入到fillOp中
   // Look for a fill Op writing into the copyOp source.
   Operation *prevOp = copyOp->getPrevNode();
-  while (prevOp) {
+  while (prevOp) {                                                        // 遍历copyOp之前的operation
     if (isMemoryEffectFree(prevOp)) {
       prevOp = prevOp->getPrevNode();
       continue;
@@ -272,11 +272,11 @@ static bool propagateCopyDestIntoProducerFill(memref::CopyOp copyOp) {
     auto fillOp = dyn_cast<linalg::FillOp>(prevOp);
     if (!fillOp)
       break;
-    if (fillOp.output() != copyOp.getSource())
+    if (fillOp.output() != copyOp.getSource())                            // 找寻是否有fillOp写入的是copyOp的source 
       break;
     // Move the fillOp and change the destination to the copy destination.
     fillOp->moveBefore(copyOp);
-    fillOp.getOutputsMutable().assign(copyOp.getTarget());
+    fillOp.getOutputsMutable().assign(copyOp.getTarget());         // 获取operand的adaptor，做修改
     return true;
   }
   return false;
@@ -318,13 +318,13 @@ propagateCopySourceIntoConsumerGeneric(memref::CopyOp copyOp,
   // Look for a generic Op reading the copyOp target.
   Operation *nextOp = copyOp->getNextNode();
   while (nextOp) {
-    if (isMemoryEffectFree(nextOp)) {
+    if (isMemoryEffectFree(nextOp)) {       // 判断operation是否是memory effect free，通过interface：MemoryEffectOpInterface和HasRecursiveMemoryEffects判断
       nextOp = nextOp->getNextNode();
       continue;
     }
-    auto consumer = dyn_cast<linalg::GenericOp>(nextOp);
-    if (!consumer || consumer.getNumDpsInits() != 1 ||
-        !consumer.getMatchingIndexingMap(consumer.getDpsInitOperand(0))
+    auto consumer = dyn_cast<linalg::GenericOp>(nextOp);               // 读入copyOp结果的应该是一个linalg::GenericOp
+    if (!consumer || consumer.getNumDpsInits() != 1 ||                                 // 这里比较有趣，默认给是支持destination style，即ouput作为参数传入， 具体见bufferization doc
+        !consumer.getMatchingIndexingMap(consumer.getDpsInitOperand(0))   // 要求index映射必须是单位映射，避免映射错乱
              .isIdentity())
       break;
     if (*consumer.getOutputs().begin() != copyOp.getTarget())
@@ -339,12 +339,12 @@ propagateCopySourceIntoConsumerGeneric(memref::CopyOp copyOp,
 /// This is needed because we are doing promotion to shared memory on buffers.
 /// This is a fragile and temporary solution until we move to be able to do this
 /// kind of transformations on tensors.
-void propagateSharedMemoryCopy(mlir::FunctionOpInterface funcOp) {
+void propagateSharedMemoryCopy(mlir::FunctionOpInterface funcOp) {      // 避免copy入shared memory，直接让生产者操作shared memory 
   SmallVector<Operation *> toDelete;
-  funcOp.walk([&toDelete](memref::CopyOp copyOp) {
-    if (hasMarker(copyOp, getCopyToWorkgroupMemoryMarker())) {
-      if (propagateCopyDestIntoProducerFill(copyOp) ||
-          propagateCopySourceIntoConsumerGeneric(copyOp, toDelete))
+  funcOp.walk([&toDelete](memref::CopyOp copyOp) {      // 遍历funcOp中的所有copy操作，收集copy入shared memory的操作
+    if (hasMarker(copyOp, getCopyToWorkgroupMemoryMarker())) {  // 收集所有带{__internal_linalg_transform__ = "copy_to_workgroup_memory"} attr的operation
+      if (propagateCopyDestIntoProducerFill(copyOp) ||                   // 用fill函数直接操作shared memory，则该copyOp可以直接删除
+          propagateCopySourceIntoConsumerGeneric(copyOp, toDelete))    // 或是直接将copyOp的source直接内联入consumer的genericOp中，要求DPS模式支持以及index映射是单位映射
         toDelete.push_back(copyOp.getOperation());
     }
   });
@@ -1013,6 +1013,7 @@ IREE::GPU::TargetAttr getGPUTargetAttr(IREE::HAL::ExecutableTargetAttr target) {
   return getCLGPUTarget(target.getContext());
 }
 
+// 辅助函数，从一个操作中提取GPU的attribute信息
 IREE::GPU::TargetAttr getGPUTargetAttr(Operation *op) {
   if (auto target = IREE::HAL::ExecutableTargetAttr::lookup(op)) {
     return getGPUTargetAttr(target);

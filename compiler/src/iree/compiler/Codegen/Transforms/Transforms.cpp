@@ -1227,13 +1227,13 @@ void packAllocs(OpBuilder &builder, mlir::FunctionOpInterface funcOp,
   }
 }
 
-LogicalResult tileLinalgOpsWithFilter(mlir::FunctionOpInterface funcOp,
-                                      scf::SCFTilingOptions options,
+LogicalResult tileLinalgOpsWithFilter(mlir::FunctionOpInterface funcOp,                        // tile linalg操作，并做attribute的替换
+                                      scf::SCFTilingOptions options,                           // attribute在这里当做状态机使用
                                       LinalgTransformationFilter filter) {
   IRRewriter rewriter(funcOp.getContext());
   SmallVector<Operation *> candidates;
   funcOp.walk([&](linalg::LinalgOp op) {
-    if (succeeded(filter.checkAndNotify(rewriter, op))) {
+    if (succeeded(filter.checkAndNotify(rewriter, op))) {                                      // checkAndNotify方法会检查op是否符合条件
       candidates.push_back(op);
     }
   });
@@ -1244,19 +1244,19 @@ LogicalResult tileLinalgOpsWithFilter(mlir::FunctionOpInterface funcOp,
     // tileUsingSCFForOp requires the op is not able to tile op with no
     // iteration domain. Skip the tiling on the op. Otherwise it returns a
     // failure.
-    if (target.getLoopIteratorTypes().empty()) {
+    if (target.getLoopIteratorTypes().empty()) {                          // 获取每个loop的iterator类型，是tiling interface的一个方法
       continue;
     }
 
     FailureOr<scf::SCFTilingResult> tiledResults =
-        scf::tileUsingSCF(rewriter, target, options);
+        scf::tileUsingSCF(rewriter, target, options);               // 核心是tileUsingSCF方法
     if (failed(tiledResults)) {
       return failure();
     }
     for (auto tiledOp : tiledResults->tiledOps) {
-      filter.replaceLinalgTransformationFilter(rewriter, tiledOp);
+      filter.replaceLinalgTransformationFilter(rewriter, tiledOp);  // 调用filter
     }
-    rewriter.replaceOp(op, tiledResults->replacements);
+    rewriter.replaceOp(op, tiledResults->replacements);         // replacements是tileResult中用来替换原来的op
   }
 
   return success();
