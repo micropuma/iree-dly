@@ -51,16 +51,16 @@ namespace mlir::iree_compiler {
 //===----------------------------------------------------------------------===//
 
 llvm::SmallVector<mlir::linalg::ProcInfo, 2>
-getGPUThreadIdsAndCounts(mlir::OpBuilder &builder, mlir::Location loc,
+getGPUThreadIdsAndCounts(mlir::OpBuilder &builder, mlir::Location loc,                  // 该函数用于 ​​生成GPU线程ID和工作组大小的分布信息​​，主要服务于MLIR中Linalg操作的并行化分发（如循环分块、线程映射）
                          unsigned numDims,
                          llvm::ArrayRef<int64_t> workgroupSize) {
-  assert(numDims <= kNumGPUDims);
+  assert(numDims <= kNumGPUDims);                              // GPU dim通常等于3
   llvm::SmallVector<mlir::linalg::ProcInfo, 2> procInfo(numDims);
   std::array<gpu::Dimension, kNumGPUDims> dimAttr{
       gpu::Dimension::x, gpu::Dimension::y, gpu::Dimension::z};
   mlir::Type indexType = builder.getIndexType();
   for (unsigned i = 0; i < numDims; ++i) {
-    procInfo[numDims - 1 - i] = {
+    procInfo[numDims - 1 - i] = {                              // 逆序存储，最终y是64，x是2
         builder.create<mlir::gpu::ThreadIdOp>(loc, indexType, dimAttr[i]),
         builder.create<mlir::arith::ConstantOp>(
             loc, builder.getIndexAttr(workgroupSize[i])),

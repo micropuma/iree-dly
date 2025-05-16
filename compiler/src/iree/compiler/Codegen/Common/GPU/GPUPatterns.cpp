@@ -282,7 +282,7 @@ void populateContractPromotionPatterns(RewritePatternSet &patterns,
           .setOperandsToPromote(operandsToPromote)
           // 设置提升的维度
           .setUseFullTileBuffers({false, false}),
-      LinalgTransformationFilter(
+      LinalgTransformationFilter(                  // 定义过滤函数，负责维护attr 状态机
           {StringAttr::get(context, getWorkgroupKTiledMarker())},
           StringAttr::get(context, getWorkgroupMemoryMarker()))
           .setMatchByDefault()

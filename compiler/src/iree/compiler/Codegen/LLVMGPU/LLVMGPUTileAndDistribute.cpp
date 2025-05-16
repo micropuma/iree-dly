@@ -80,7 +80,7 @@ static LogicalResult tileToSerialLoops(mlir::FunctionOpInterface funcOp) {
     }
   }
 
-  {
+  {       // 一些tiling的善后工作
     RewritePatternSet wgTilingCanonicalizationPatterns =
         linalg::getLinalgTilingCanonicalizationPatterns(funcOp.getContext());
     populateAffineMinSCFCanonicalizationPattern(
@@ -170,15 +170,15 @@ static LogicalResult tileToInvocation(mlir::FunctionOpInterface funcOp,
                                       SmallVectorImpl<int64_t> &workgroupSize) {
   linalg::TileSizeComputationFunction getInnerTileSizeFn =
       [&](OpBuilder &builder, Operation *operation) {
-        return calculateDistributedTileSize(workgroupSize, builder, operation);
+        return calculateDistributedTileSize(workgroupSize, builder, operation);    // 计算tile size: [64/32, 2/1, 1/1] = [2, 2, 1]
       };
-  auto getThreadProcInfoFn =
+  auto getThreadProcInfoFn =                                                            // 显示计算生成thread id，不断向GPU的kernel表达靠近
       [&workgroupSize](OpBuilder &builder, Location loc,
                        ArrayRef<Range> parallelLoopRanges) {
         return getGPUThreadIdsAndCounts(builder, loc, parallelLoopRanges.size(),
                                         workgroupSize);
       };
-  linalg::LinalgLoopDistributionOptions invocationDistributionOptions;
+  linalg::LinalgLoopDistributionOptions invocationDistributionOptions;                             // 设定thread的分布选项，设定procInfo
   invocationDistributionOptions.procInfo = getThreadProcInfoFn;
 
   auto tilingOptions =
@@ -241,7 +241,7 @@ public:
     // Tile again at the workgroup level since reduction dimension were
     // ignored. Dimensions already tiled will be ignore since we tile to the
     // same size.
-    if (failed(tileToSerialLoops(funcOp))) {
+    if (failed(tileToSerialLoops(funcOp))) {         // 将k维度（规约维度）按照tilesize进行分块
       return signalPassFailure();
     }
 
@@ -262,10 +262,10 @@ public:
     int64_t flatWorkgroupSize =
         workgroupSize[0] * workgroupSize[1] * workgroupSize[2];
     // Only promote to workgroup size if there are multiple warps.
-    if (flatWorkgroupSize > kWarpSize) {
+    if (flatWorkgroupSize > kWarpSize) {                             // 以[64,2,1]为例，flatWorkgroupSize=128时，表示有2x2个warp，所以切分成warp是有必要的
       RewritePatternSet promotionPatterns(&getContext());
 
-      populateContractPromotionPatterns(promotionPatterns, {0, 1});
+      populateContractPromotionPatterns(promotionPatterns, {0, 1});     // 0和1表示对A/B矩阵进行提升
 
       if (failed(applyPatternsAndFoldGreedily(funcOp,
                                               std::move(promotionPatterns)))) {
