@@ -21,6 +21,8 @@ namespace {
 /// Check if AllocOp has a CollapseShapeOp user.
 static bool hasCollapseShapeUser(memref::AllocOp allocOp) {
   SmallVector<Operation *> users(allocOp->getUsers());
+
+  // 对于一个allocOp操作的每个user都要做检查，包括subview user传播user链条
   while (!users.empty()) {
     auto user = users.pop_back_val();
     if (isa<memref::CollapseShapeOp>(user)) {
@@ -37,6 +39,7 @@ static bool hasCollapseShapeUser(memref::AllocOp allocOp) {
 
 /// Pad out the inner dimension of the `memref.alloc` op in order reduce the
 /// chances to have bank conflicts when reading 2D shapes within shared memory.
+/// 注意，内存的padding是在memory的最内层维度做
 static void padAlloc(MLIRContext *context, memref::AllocOp allocOp,
                      unsigned paddingSizeBits) {
   auto allocOpShape = allocOp.getType().getShape();
@@ -48,9 +51,11 @@ static void padAlloc(MLIRContext *context, memref::AllocOp allocOp,
 
   // Return if we have CollapseShape op as an user as padding in that case is
   // unsupported.
+  // CollapseShapeOp会压缩某个维度，我们的padding暂时不支持对alloc做padding，然后再压缩
   if (hasCollapseShapeUser(allocOp))
     return;
 
+  // 获取allocOp的数值类型
   Type elType = allocOp.getType().getElementType();
   unsigned bitwidth =
       mlir::DataLayout::closest(allocOp).getTypeSizeInBits(elType);
@@ -70,6 +75,8 @@ static void padAlloc(MLIRContext *context, memref::AllocOp allocOp,
   SmallVector<int64_t> strides(shape.size(), 1);
   Value subview = rewriter.create<memref::SubViewOp>(
       loc, paddedAlloc, offsets, allocOp.getType().getShape(), strides);
+  
+  // 替换存储的使用，并传播类型
   replaceMemrefUsesAndPropagateType(rewriter, loc, allocOp, subview);
   rewriter.eraseOp(allocOp);
 }
@@ -93,10 +100,12 @@ struct GPUReduceBankConflictsPass final
 
 } // namespace
 
+/// 核心padding逻辑
 LogicalResult reduceSharedMemoryBankConflicts(mlir::FunctionOpInterface funcOp,
                                               unsigned paddingSize) {
   SmallVector<memref::AllocOp> sharedMemAllocs;
   // Collect all the alloc operations.
+  // 注意，只有在共享内存中的才收集
   funcOp.walk([&](memref::AllocOp allocOp) {
     if (hasSharedMemoryAddressSpace(allocOp.getType()) &&
         allocOp.getType().hasStaticShape()) {
@@ -104,6 +113,7 @@ LogicalResult reduceSharedMemoryBankConflicts(mlir::FunctionOpInterface funcOp,
     }
   });
   for (memref::AllocOp alloc : sharedMemAllocs)
+    // 对于共享内存中的alloc操作，进行padding
     padAlloc(funcOp->getContext(), alloc, paddingSize);
 
   // In the current form this always succeeds.
